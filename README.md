@@ -1,5 +1,7 @@
 URGENT, READ BEFORE DOWNLOADING: BEFORE EXTRACTING THE ZIP, RIGHT-CLICK IT, GO TO "PROPERTIES", "GENERAL" AND SEARCH FOR "UNBLOCK"! Otherwise, Windows doesn't let you download the .DLL and you get an error on startup.
 
+By the way, check my other project that makes Flowery say whatever you type!
+
 Roaring Knight Window Slicer
 
 Instructions
