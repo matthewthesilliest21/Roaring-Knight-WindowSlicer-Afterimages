@@ -1,8 +1,9 @@
+URGENT, READ BEFORE DOWNLOADING: BEFORE EXTRACTING THE ZIP, RIGHT-CLICK IT, GO TO "PROPERTIES", "GENERAL" AND SEARCH FOR "UNBLOCK"! Otherwise, Windows doesn't let you download the .DLL and you get an error on startup.
+
 Roaring Knight Window Slicer
 
 Instructions
 
-IN CASE YOU DIDN'T SEE GITHUB'S READ ME: Before extracting the zip, go to its properties, general and unblock. Otherwise, Windows blocks the .DLL files and you get an error at startup.
 1. Keep the WindowSlice folder together; it can live anywhere, like a homeless person
 2. Double-click Start-WindowSlice.cmd
 3. On first run, you can change a lot of stuff. Window Slice then stays in the notification area by the clock, and you can open these settings again in its context menu
