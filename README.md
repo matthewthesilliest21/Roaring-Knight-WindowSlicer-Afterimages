@@ -28,3 +28,15 @@ Limits
 Also, secret feature! Hover over a fragment and press the arrow keys to rotate it like a 3D object!
 
 For the afterimages, go to the other folder.
+
+License and Attribution
+
+Window Slicer is distributed under a custom attribution-required license.
+
+You're allowed to use, modify, redistribute, and showcase this project, subject to the conditions in the LICENSE file on this folder.
+
+Mandatory attribution: Public videos, streams, demonstrations, and other content featuring Window Slicer or its output must contain credit and include a link to the original project.
+
+Creator: [@matthewthesilliest21](https://github.com/matthewthesilliest21)
+
+Project: [Window Slicer](https://github.com/matthewthesilliest21/Roaring-Knight-WindowSlicer-Afterimages)
