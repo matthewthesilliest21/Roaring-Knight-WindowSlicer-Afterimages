@@ -28,6 +28,7 @@ namespace WindowSlice
         public string QuickSliceHotkey;
         public string SelectionHotkey;
         public string PrecisionHotkey;
+        public string GlueHotkey;
         public string DisperseSnapshotsHotkey;
         public string Direction = "Vertical";
         public int MultiSlashCount = 6;
@@ -47,6 +48,8 @@ namespace WindowSlice
         public bool KeepWindowsOpenAfterSlicing = false;
         public bool DetachedPiecesInteractive = false;
         public bool RefreshLiveFragments = false;
+        public bool GlueOutlineFades = true;
+        public int GlueOutlineThickness = 1;
 
         public void Normalize()
         {
@@ -62,7 +65,7 @@ namespace WindowSlice
             HotkeySpec selection;
             if (!HotkeySpec.TryParse(SelectionHotkey, out selection)) SelectionHotkey = "F8";
             HotkeySpec precision;
-            if (!HotkeySpec.TryParse(PrecisionHotkey, out precision)) PrecisionHotkey = "Ctrl+Shift+F8";
+            if (!HotkeySpec.TryParse(PrecisionHotkey, out precision)) PrecisionHotkey = "Ctrl+Shift+F";
 
             HotkeySpec.TryParse(QuickSliceHotkey, out quick);
             HotkeySpec.TryParse(SelectionHotkey, out selection);
@@ -83,10 +86,24 @@ namespace WindowSlice
                 HotkeySpec.TryParse(PrecisionHotkey, out precision);
                 if (SameHotkey(quick, precision) || SameHotkey(selection, precision)) PrecisionHotkey = "Ctrl+Alt+P";
             }
+                        if (String.IsNullOrWhiteSpace(GlueHotkey)) GlueHotkey = "Ctrl+Alt+G";
+            HotkeySpec glue;
+            if (!HotkeySpec.TryParse(GlueHotkey, out glue)) GlueHotkey = "Ctrl+Alt+G";
+            HotkeySpec.TryParse(GlueHotkey, out glue);
+            if (SameHotkey(quick, glue) || SameHotkey(selection, glue) || SameHotkey(precision, glue))
+            {
+                GlueHotkey = "Ctrl+Shift+G";
+                HotkeySpec.TryParse(GlueHotkey, out glue);
+                if (SameHotkey(quick, glue) || SameHotkey(selection, glue) || SameHotkey(precision, glue))
+                {
+                    GlueHotkey = "Ctrl+Alt+Shift+G";
+                    HotkeySpec.TryParse(GlueHotkey, out glue);
+                }
+            }
             HotkeySpec disperse;
             if (!String.IsNullOrWhiteSpace(DisperseSnapshotsHotkey) &&
                 (!HotkeySpec.TryParse(DisperseSnapshotsHotkey, out disperse) ||
-                 SameHotkey(quick, disperse) || SameHotkey(selection, disperse) || SameHotkey(precision, disperse)))
+                 SameHotkey(quick, disperse) || SameHotkey(selection, disperse) || SameHotkey(precision, disperse) || SameHotkey(glue, disperse)))
                 DisperseSnapshotsHotkey = String.Empty;
             Hotkey = QuickSliceHotkey;
 
@@ -109,14 +126,18 @@ namespace WindowSlice
                 if (SlashThickness < 1) SlashThickness = 1;
                 if (SlashThickness > 40) SlashThickness = 40;
             }
+            if (GlueOutlineThickness < 1) GlueOutlineThickness = 1;
+if (!UnlimitedPerformance && GlueOutlineThickness > 20)
+    GlueOutlineThickness = 20;
             if (!KeepWindowsOpenAfterSlicing) DetachedPiecesInteractive = false;
-            if (!CanRefreshLiveFragments(KeepWindowsOpenAfterSlicing, KeepFragments)) RefreshLiveFragments = false;
+            if (!CanRefreshLiveFragments(KeepWindowsOpenAfterSlicing, KeepFragments))
+    RefreshLiveFragments = false;
         }
 
         internal static bool CanRefreshLiveFragments(bool keepWindowsOpen, bool keepFragments)
-        {
-            return keepWindowsOpen && !keepFragments;
-        }
+{
+    return keepWindowsOpen;
+}
 
         private static bool SameHotkey(HotkeySpec left, HotkeySpec right)
         {
@@ -213,6 +234,9 @@ namespace WindowSlice
         private const int WmClose = 0x0010;
         private const int DwmwaExtendedFrameBounds = 9;
         private const int DwmwaCloaked = 14;
+        private const int DwmwaBorderColor = 34;
+        private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
+        private const int DwmColorDefault = unchecked((int)0xFFFFFFFF);
         private const int TokenElevation = 20;
         private const uint ProcessQueryLimitedInformation = 0x1000;
         private const uint TokenQuery = 0x0008;
@@ -271,6 +295,8 @@ namespace WindowSlice
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hWnd, ref POINT point);
+        [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
+        [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr hWndFrom, IntPtr hWndTo, ref POINT points, int count);
         [DllImport("user32.dll")] private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT point, uint flags);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
@@ -280,6 +306,7 @@ namespace WindowSlice
         [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
         [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
         [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
+        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int index);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)] private static extern IntPtr GetWindowLongPtr32(IntPtr hWnd, int index);
         [DllImport("gdi32.dll", SetLastError = true)] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
@@ -606,6 +633,35 @@ namespace WindowSlice
             return true;
         }
 
+        public static bool TryGetClientOrigin(IntPtr handle, out Point origin)
+        {
+            POINT point = new POINT { X = 0, Y = 0 };
+            if (handle == IntPtr.Zero || IsIconic(handle) || !ClientToScreen(handle, ref point))
+            {
+                origin = Point.Empty;
+                return false;
+            }
+            origin = new Point(point.X, point.Y);
+            return true;
+        }
+
+        public static bool IsWindowChildPointFromClientOrigin(IntPtr parent, Point screenPoint, Point clientOrigin, out IntPtr child, out Point clientPoint)
+        {
+            clientPoint = new Point(screenPoint.X - clientOrigin.X, screenPoint.Y - clientOrigin.Y);
+            child = parent;
+            for (int depth = 0; depth < 32; depth++)
+            {
+                POINT point = new POINT { X = clientPoint.X, Y = clientPoint.Y };
+                IntPtr next = ChildWindowFromPointEx(child, point, 0x0001 | 0x0002);
+                if (next == IntPtr.Zero || next == child) break;
+                POINT mapped = point;
+                MapWindowPoints(child, next, ref mapped, 1);
+                child = next;
+                clientPoint = new Point(mapped.X, mapped.Y);
+            }
+            return true;
+        }
+
         public static IntPtr FindInputWindowAtPoint(IntPtr sourceWindow, Point screenPoint)
         {
             IntPtr hit = WindowFromPoint(new POINT { X = screenPoint.X, Y = screenPoint.Y });
@@ -671,6 +727,22 @@ namespace WindowSlice
             if (SendMessageTimeout(handle, 0x0084, IntPtr.Zero, packedPoint, 0x0002, 650, out result) == IntPtr.Zero)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Windows could not hit-test the source window frame.");
             return result.ToInt32();
+        }
+
+        public static bool TryHideWindowBorder(IntPtr handle, out int previousColor)
+        {
+            previousColor = DwmColorDefault;
+            int current;
+            if (DwmGetWindowAttribute(handle, DwmwaBorderColor, out current, sizeof(int)) == 0) previousColor = current;
+            int none = DwmColorNone;
+            return DwmSetWindowAttribute(handle, DwmwaBorderColor, ref none, sizeof(int)) == 0;
+        }
+
+        public static void RestoreWindowBorder(IntPtr handle, int color)
+        {
+            if (!IsWindow(handle)) return;
+            int value = color;
+            DwmSetWindowAttribute(handle, DwmwaBorderColor, ref value, sizeof(int));
         }
 
         public static bool TryGetFrameBounds(IntPtr handle, out Rectangle bounds)
@@ -1023,6 +1095,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private bool _refreshFailureReported;
         private bool _liveCaptureUnavailable;
         private int _refreshInProgress;
+        private bool _borderHidden;
+        private bool _sourceHidden;
+        private Point _clientOriginAtSlice;
+        private bool _hasClientOrigin;
+        private int _previousBorderColor;
+        private int _nextRefreshTick;
+        private int _unchangedRefreshes;
+        private ulong _lastFrameSignature;
+        private bool _hasFrameSignature;
 
         public LiveWindowSliceSession(WindowTarget target, Rectangle sourceBounds)
             : this(target, sourceBounds, false)
@@ -1037,14 +1118,17 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 throw new InvalidOperationException("The selected window is no longer available.");
             _target = target;
             _sourceBounds = sourceBounds;
+            _hasClientOrigin = Native.TryGetClientOrigin(target.Handle, out _clientOriginAtSlice);
             _originalRegion = Native.CaptureWindowRegion(target.Handle, out _hadOriginalRegion);
             _refreshFragments = refreshFragments;
+            _nextRefreshTick = Environment.TickCount;
             _refreshTimer = new System.Windows.Forms.Timer();
             _refreshTimer.Interval = refreshFragments ? 100 : 250;
             _refreshTimer.Tick += delegate
             {
                 MonitorTargetWindow();
-                if (!_restored && !_refreshFailureReported && _refreshFragments) RefreshDetachedPieces();
+                if (!_restored && !_refreshFailureReported && _refreshFragments && unchecked(Environment.TickCount - _nextRefreshTick) >= 0)
+                    RefreshDetachedPieces();
             };
             if (refreshFragments)
                 _refreshContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
@@ -1074,6 +1158,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     Native.ApplyWindowPolygon(_target.Handle, polygon, regionOffset, windowSize, _originalRegion, _hadOriginalRegion);
                 _remainingPolygon = polygon == null ? null : new List<PointF>(polygon);
                 _excludedShape = excludedShape == null ? null : new List<PointF>(excludedShape);
+                if (!_borderHidden)
+                {
+                    int previousBorder;
+                    if (Native.TryHideWindowBorder(_target.Handle, out previousBorder))
+                    {
+                        _previousBorderColor = previousBorder;
+                        _borderHidden = true;
+                    }
+                }
             }
         }
 
@@ -1083,12 +1176,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             if (_detachedPieces.Contains(piece)) return;
             _detachedPieces.Add(piece);
             piece.AttachLiveSliceSession(this, originalPieceBounds, forwardInput);
+            _hasFrameSignature = false;
+            _unchangedRefreshes = 0;
             if (_refreshFragments) RefreshDetachedPieces();
         }
 
         internal void MonitorTargetWindow()
         {
             if (!_restored && !_target.IsStillSameWindow()) Restore();
+            else if (_sourceHidden && !_restored && Native.IsWindowVisible(_target.Handle)) Native.HideWindow(_target.Handle);
         }
 
         internal void CommitRemainingWindow()
@@ -1104,6 +1200,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 }
                 lock (_regionSync)
                 {
+                    ShowHiddenSourceWindow();
                     if (_originalRegion != IntPtr.Zero)
                     {
                         Native.DeleteGdiObject(_originalRegion);
@@ -1139,6 +1236,13 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 ReportRefreshFailure(new InvalidOperationException("The live window's remaining shape is unavailable."));
                 return;
             }
+            bool anyPieceVisible = false;
+            for (int i = 0; i < _detachedPieces.Count; i++)
+            {
+                SliceForm candidate = _detachedPieces[i];
+                if (candidate != null && !candidate.IsDisposed && candidate.Visible) { anyPieceVisible = true; break; }
+            }
+            if (!anyPieceVisible) return;
             if (Interlocked.CompareExchange(ref _refreshInProgress, 1, 0) != 0) return;
             bool queued = ThreadPool.QueueUserWorkItem(delegate
             {
@@ -1200,6 +1304,19 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 }
                 catch (Exception ex) { failure = ex; }
 
+                bool frameChanged = false;
+                if (failure == null && currentWindow != null)
+                {
+                    try
+                    {
+                        ulong signature = FrameSignature(currentWindow);
+                        frameChanged = !_hasFrameSignature || signature != _lastFrameSignature;
+                        _lastFrameSignature = signature;
+                        _hasFrameSignature = true;
+                    }
+                    catch { frameChanged = true; }
+                }
+
                 try
                 {
                     _refreshContext.Post(delegate
@@ -1217,11 +1334,11 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                                 ReportRefreshFailure(failure);
                                 return;
                             }
-                            if (currentWindow == null) return;
+                            if (currentWindow == null || !frameChanged) return;
                             for (int i = 0; i < _detachedPieces.Count; i++)
                             {
                                 SliceForm piece = _detachedPieces[i];
-                                if (piece != null && !piece.IsDisposed)
+                                if (piece != null && !piece.IsDisposed && piece.Visible)
                                     piece.RefreshFromLiveWindow(currentWindow, _sourceBounds.Location);
                             }
                         }
@@ -1229,6 +1346,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                         finally
                         {
                             if (currentWindow != null) currentWindow.Dispose();
+                            ScheduleNextRefresh(frameChanged);
                             Interlocked.Exchange(ref _refreshInProgress, 0);
                         }
                     }, null);
@@ -1236,6 +1354,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 catch (Exception ex)
                 {
                     if (currentWindow != null) currentWindow.Dispose();
+                    ScheduleNextRefresh(false);
                     Interlocked.Exchange(ref _refreshInProgress, 0);
                     System.Diagnostics.Trace.TraceError("Window Slice could not dispatch a live-fragment refresh: " + ex.ToString());
                 }
@@ -1244,6 +1363,77 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             {
                 Interlocked.Exchange(ref _refreshInProgress, 0);
                 ReportRefreshFailure(new InvalidOperationException("Windows could not schedule the fragment refresh task."));
+            }
+        }
+
+        internal bool IsSourceHidden { get { return _sourceHidden; } }
+
+        internal bool SourceWindowContains(Point screenPoint)
+        {
+            if (_restored || _restoring || !_target.IsStillSameWindow()) return false;
+            return Native.FindInputWindowAtPoint(_target.Handle, screenPoint) != IntPtr.Zero;
+        }
+
+        internal void SetSourceHidden(bool hidden)
+        {
+            lock (_regionSync)
+            {
+                if (_restored || !_target.IsStillSameWindow()) return;
+                if (hidden)
+                {
+                    Native.HideWindow(_target.Handle);
+                    _sourceHidden = true;
+                }
+                else ShowHiddenSourceWindow();
+            }
+        }
+
+        private void ShowHiddenSourceWindow()
+        {
+            if (!_sourceHidden) return;
+            _sourceHidden = false;
+            if (_target.IsStillSameWindow()) Native.ShowWindowWithoutActivate(_target.Handle);
+        }
+
+        private void ScheduleNextRefresh(bool frameChanged)
+        {
+            if (frameChanged) _unchangedRefreshes = 0;
+            else if (_unchangedRefreshes < 1000) _unchangedRefreshes++;
+            int delay;
+            if (_unchangedRefreshes < 2) delay = 100;
+            else if (_unchangedRefreshes < 5) delay = 400;
+            else if (_unchangedRefreshes < 12) delay = 1000;
+            else delay = 2500;
+            _nextRefreshTick = unchecked(Environment.TickCount + delay);
+        }
+
+        internal void NotifyLiveInput()
+        {
+            _unchangedRefreshes = 0;
+            _nextRefreshTick = Environment.TickCount;
+        }
+
+        private static ulong FrameSignature(Bitmap bitmap)
+        {
+            unchecked
+            {
+                ulong hash = 14695981039346656037UL;
+                BitmapData data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                try
+                {
+                    int[] row = new int[bitmap.Width];
+                    for (int y = 0; y < bitmap.Height; y++)
+                    {
+                        Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, row.Length);
+                        for (int x = 0; x < row.Length; x++)
+                        {
+                            hash ^= (uint)row[x];
+                            hash *= 1099511628211UL;
+                        }
+                    }
+                }
+                finally { bitmap.UnlockBits(data); }
+                return hash;
             }
         }
 
@@ -1311,19 +1501,36 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         {
             if (_restored || !_target.IsStillSameWindow() || piece == null) return false;
             if (message == 0) return false;
+            NotifyLiveInput();
             Point cursor = System.Windows.Forms.Cursor.Position;
             Point originalPoint = piece.MapToOriginalScreen(cursor);
-            IntPtr inputWindow = Native.FindInputWindowAtPoint(_target.Handle, originalPoint);
-            if (inputWindow == IntPtr.Zero) inputWindow = _target.Handle;
+            bool minimized = Native.IsIconic(_target.Handle);
+            bool noActivate = minimized || _sourceHidden;
+            IntPtr inputWindow;
             IntPtr child;
             Point clientPoint;
-            if (!Native.IsWindowChildPoint(inputWindow, originalPoint, out child, out clientPoint))
+            if (minimized)
             {
-                inputWindow = _target.Handle;
-                if (!Native.IsWindowChildPoint(inputWindow, originalPoint, out child, out clientPoint))
+                if (!_hasClientOrigin)
                 {
                     ReportInputFailure();
                     return false;
+                }
+                inputWindow = _target.Handle;
+                Native.IsWindowChildPointFromClientOrigin(inputWindow, originalPoint, _clientOriginAtSlice, out child, out clientPoint);
+            }
+            else
+            {
+                inputWindow = Native.FindInputWindowAtPoint(_target.Handle, originalPoint);
+                if (inputWindow == IntPtr.Zero) inputWindow = _target.Handle;
+                if (!Native.IsWindowChildPoint(inputWindow, originalPoint, out child, out clientPoint))
+                {
+                    inputWindow = _target.Handle;
+                    if (!Native.IsWindowChildPoint(inputWindow, originalPoint, out child, out clientPoint))
+                    {
+                        ReportInputFailure();
+                        return false;
+                    }
                 }
             }
             if (child == IntPtr.Zero) child = inputWindow;
@@ -1339,7 +1546,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 {
                     if (pendingButton == child && Native.IsStandardButton(pendingButton))
                     {
-                        bool clickFocusAvailable = Native.SetForegroundWindow(inputWindow) || Native.GetForegroundWindow() == inputWindow;
+                        bool clickFocusAvailable = noActivate || Native.SetForegroundWindow(inputWindow) || Native.GetForegroundWindow() == inputWindow;
                         bool clicked = inputWindow == _target.Handle
                             ? Native.ClickStandardButton(pendingButton)
                             : Native.ClickStandardButtonWithMouse(pendingButton, clientPoint);
@@ -1364,7 +1571,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 else if (message == 0x0204) buttonState |= 0x0002;
                 else if (message == 0x0207) buttonState |= 0x0010;
                 if (message == 0x0201 || message == 0x0204 || message == 0x0207 || message == 0x020B)
-                    focusAvailable = Native.SetForegroundWindow(inputWindow) || Native.GetForegroundWindow() == inputWindow;
+                    focusAvailable = noActivate || Native.SetForegroundWindow(inputWindow) || Native.GetForegroundWindow() == inputWindow;
                 if (e.Button == MouseButtons.XButton1) buttonState |= 0x00010000;
                 else if (e.Button == MouseButtons.XButton2) buttonState |= 0x00020000;
                 int packed = ((clientPoint.Y & 0xFFFF) << 16) | (clientPoint.X & 0xFFFF);
@@ -1393,11 +1600,17 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     _refreshTimer.Stop();
                 lock (_regionSync)
                 {
+                    ShowHiddenSourceWindow();
                     if (_target.IsStillSameWindow())
                     {
                         if (!Native.RestoreWindowRegion(_target.Handle, _hadOriginalRegion ? _originalRegion : IntPtr.Zero))
                             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Windows could not restore the source window's original shape.");
                         _originalRegion = IntPtr.Zero;
+                        if (_borderHidden)
+                        {
+                            Native.RestoreWindowBorder(_target.Handle, _previousBorderColor);
+                            _borderHidden = false;
+                        }
                     }
                     else if (_originalRegion != IntPtr.Zero)
                     {
@@ -2674,6 +2887,14 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             if (session != null) LiveSessions.Remove(session);
         }
 
+        public static bool IsLiveSourceWindowAt(Point point)
+        {
+            LiveWindowSliceSession[] sessions = LiveSessions.ToArray();
+            for (int i = 0; i < sessions.Length; i++)
+                if (sessions[i].SourceWindowContains(point)) return true;
+            return false;
+        }
+
         public static bool ContainsPoint(Point point)
         {
             for (int i = 0; i < Fragments.Count; i++)
@@ -2968,6 +3189,12 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private bool _forwardLiveInput;
         private bool _liveMoveMode;
         private IntPtr _liveButtonClickTarget;
+        internal static bool GlueModeActive;
+        private Bitmap _glueOutline;
+        private System.Windows.Forms.Timer _glueFadeTimer;
+        private Stopwatch _glueFadeClock;
+        private int _glueFadeMilliseconds;
+        private float _glueOutlineAlpha;
 
         public SliceForm(Bitmap image, Rectangle initialBounds, PointF[] shape)
         {
@@ -3048,6 +3275,28 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 };
                 _fragmentMenu.Items.Add(new ToolStripSeparator());
                 _fragmentMenu.Items.Add(restoreItem);
+                ToolStripMenuItem hideSourceItem = new ToolStripMenuItem("Hide Source Window");
+                hideSourceItem.Click += delegate
+                {
+                    if (_liveSliceSession == null) return;
+                    try { _liveSliceSession.SetSourceHidden(!_liveSliceSession.IsSourceHidden); }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("The source window could not be hidden or shown.\r\n\r\n" + ex.Message, "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                };
+                _fragmentMenu.Opening += delegate
+                {
+                    hideSourceItem.Visible = _liveSliceSession != null;
+                    hideSourceItem.Text = _liveSliceSession != null && _liveSliceSession.IsSourceHidden ? "Show Source Window" : "Hide Source Window";
+                };
+                _fragmentMenu.Items.Add(hideSourceItem);
+                ToolStripMenuItem hideFragmentItem = new ToolStripMenuItem("Hide This Fragment");
+                hideFragmentItem.Click += delegate
+                {
+                    if (!IsDisposed) Hide();
+                };
+                _fragmentMenu.Items.Add(hideFragmentItem);
                 _liveModeItem = new ToolStripMenuItem("Toggle Move Mode");
                 _liveModeItem.Click += delegate { ToggleLiveMoveMode(); };
                 _fragmentMenu.Items.Add(new ToolStripSeparator());
@@ -3173,7 +3422,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
 
         public bool RotateByArrowKey(Keys key)
         {
-            if (!_persistent || !_rotationEnabled || _dragging || IsDisposed) return false;
+                        if (!_persistent || !_rotationEnabled || _dragging || IsDisposed || GlueModeActive) return false;
             const double step = 12.0;
             if (key != Keys.Left && key != Keys.Right && key != Keys.Up && key != Keys.Down) return false;
             if (!_rotationHoverActive)
@@ -3358,9 +3607,96 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 Graphics g = _surface.Graphics;
                 g.Clear(Color.Transparent);
                 g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-                DrawProjectedImage(g);
+                                DrawProjectedImage(g);
+                DrawGlueOutline(g);
             }
             _surface.Update(Handle, Location, (byte)Math.Round(_opacity * 255.0));
+        }
+
+        internal void BeginGlueOutline(Bitmap outline, int durationMilliseconds)
+        {
+            if (outline == null) return;
+            if (IsDisposed || _image == null || outline.Width != _image.Width || outline.Height != _image.Height)
+            {
+                outline.Dispose();
+                return;
+            }
+            StopGlueOutline();
+            _glueOutline = outline;
+            _glueOutlineAlpha = 1.0f;
+            _glueFadeMilliseconds = Math.Max(1, durationMilliseconds);
+            _glueFadeClock = Stopwatch.StartNew();
+            _glueFadeTimer = new System.Windows.Forms.Timer();
+            _glueFadeTimer.Interval = 33;
+            _glueFadeTimer.Tick += OnGlueFadeTick;
+            _glueFadeTimer.Start();
+            PresentLayered(true);
+        }
+
+        private void OnGlueFadeTick(object sender, EventArgs e)
+        {
+            if (IsDisposed || _glueOutline == null || _glueFadeClock == null)
+            {
+                StopGlueOutline();
+                return;
+            }
+            double progress = _glueFadeClock.ElapsedMilliseconds / (double)_glueFadeMilliseconds;
+            if (progress >= 1.0)
+            {
+                StopGlueOutline();
+                PresentLayered(true);
+                return;
+            }
+            _glueOutlineAlpha = (float)(1.0 - progress);
+            PresentLayered(true);
+        }
+
+        private void StopGlueOutline()
+        {
+            if (_glueFadeTimer != null)
+            {
+                _glueFadeTimer.Stop();
+                _glueFadeTimer.Tick -= OnGlueFadeTick;
+                _glueFadeTimer.Dispose();
+                _glueFadeTimer = null;
+            }
+            _glueFadeClock = null;
+            if (_glueOutline != null) { _glueOutline.Dispose(); _glueOutline = null; }
+            _glueOutlineAlpha = 0.0f;
+        }
+
+        private void DrawGlueOutline(Graphics graphics)
+        {
+            if (_glueOutline == null || _glueOutlineAlpha <= 0.0f || _image == null) return;
+            ColorMatrix matrix = new ColorMatrix();
+            matrix.Matrix33 = _glueOutlineAlpha;
+            using (ImageAttributes attributes = new ImageAttributes())
+            {
+                attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                Rectangle destination = new Rectangle(0, 0, _image.Width, _image.Height);
+                if (_rotationX == 0.0 && _rotationY == 0.0)
+                {
+                    graphics.DrawImage(_glueOutline, destination, 0, 0, _glueOutline.Width, _glueOutline.Height, GraphicsUnit.Pixel, attributes);
+                    return;
+                }
+                double radiansX = _rotationX * Math.PI / 180.0;
+                double radiansY = _rotationY * Math.PI / 180.0;
+                float m11 = (float)Math.Cos(radiansY);
+                float m12 = 0.0f;
+                float m21 = (float)(Math.Sin(radiansX) * Math.Sin(radiansY));
+                float m22 = (float)Math.Cos(radiansX);
+                float sourceCenterX = _image.Width * 0.5f;
+                float sourceCenterY = _image.Height * 0.5f;
+                float dx = Width * 0.5f - (m11 * sourceCenterX) - (m21 * sourceCenterY);
+                float dy = Height * 0.5f - (m12 * sourceCenterX) - (m22 * sourceCenterY);
+                using (System.Drawing.Drawing2D.Matrix transform = new System.Drawing.Drawing2D.Matrix(m11, m12, m21, m22, dx, dy))
+                {
+                    graphics.Transform = transform;
+                    graphics.DrawImage(_glueOutline, destination, 0, 0, _glueOutline.Width, _glueOutline.Height, GraphicsUnit.Pixel, attributes);
+                    graphics.ResetTransform();
+                }
+            }
         }
 
         private void DrawProjectedImage(Graphics graphics)
@@ -3570,12 +3906,556 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     session.Detach(this);
                 }
                 PersistentFragmentStore.Remove(this);
+                StopGlueOutline();
                 if (_fragmentMenu != null) { _fragmentMenu.Dispose(); _fragmentMenu = null; }
                 if (_surface != null) { _surface.Dispose(); _surface = null; }
                 if (_image != null) { _image.Dispose(); _image = null; }
                 if (_backImage != null) { _backImage.Dispose(); _backImage = null; }
             }
             base.Dispose(disposing);
+        }
+    }
+
+    internal sealed class GlueFragment
+    {
+        public readonly SliceForm Fragment;
+        public Rectangle Bounds;
+        private bool[] _mask;
+
+        public GlueFragment(SliceForm fragment)
+        {
+            Fragment = fragment;
+            Bounds = fragment.Bounds;
+        }
+
+        public bool[] Mask
+        {
+            get
+            {
+                if (_mask == null) _mask = BuildMask();
+                return _mask;
+            }
+        }
+
+        private bool[] BuildMask()
+        {
+            bool[] mask = new bool[Math.Max(1, Bounds.Width * Bounds.Height)];
+            try
+            {
+                using (Bitmap image = Fragment.CloneImage())
+                {
+                    int width = Math.Min(image.Width, Bounds.Width);
+                    int height = Math.Min(image.Height, Bounds.Height);
+                    BitmapData data = image.LockBits(new Rectangle(0, 0, image.Width, image.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                    try
+                    {
+                        byte[] row = new byte[image.Width * 4];
+                        for (int y = 0; y < height; y++)
+                        {
+                            Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, row.Length);
+                            for (int x = 0; x < width; x++) mask[y * Bounds.Width + x] = row[x * 4 + 3] > 12;
+                        }
+                    }
+                    finally { image.UnlockBits(data); }
+                }
+            }
+            catch { }
+            return mask;
+        }
+
+        public bool Contains(int x, int y)
+        {
+            if (x < Bounds.Left || y < Bounds.Top || x >= Bounds.Right || y >= Bounds.Bottom) return false;
+            return Mask[(y - Bounds.Top) * Bounds.Width + (x - Bounds.Left)];
+        }
+
+        public bool Within(int x, int y, int radius)
+        {
+            for (int yy = y - radius; yy <= y + radius; yy++)
+                for (int xx = x - radius; xx <= x + radius; xx++)
+                    if (Contains(xx, yy)) return true;
+            return false;
+        }
+
+        public void MoveTo(Point location)
+        {
+            Bounds = new Rectangle(location, Bounds.Size);
+            if (!Fragment.IsDisposed) Fragment.Bounds = Bounds;
+        }
+    }
+
+    internal sealed class GlueSelectionForm : Form
+    {
+        internal const int FadeMilliseconds = 3000;
+        internal const int ContactGap = 2;
+        internal const int ContactReach = ContactGap + 1;
+        internal const int OutlineAlpha = 150;
+        private static readonly Point[] ContactOffsets = new Point[]
+        {
+            new Point(ContactReach, 0), new Point(-ContactReach, 0), new Point(0, ContactReach), new Point(0, -ContactReach),
+            new Point(ContactReach, ContactReach), new Point(ContactReach, -ContactReach), new Point(-ContactReach, ContactReach), new Point(-ContactReach, -ContactReach)
+        };
+
+        private sealed class GlueContact
+        {
+            public GlueFragment Other;
+            public Point Direction;
+        }
+
+        private readonly string _hotkeyText;
+        private readonly bool _outlineFades;
+        private readonly int _outlineThickness;
+        private readonly bool _rotationEnabled;
+        private readonly Action _playGlue;
+        private Action _completed;
+        private readonly Rectangle _virtualScreen;
+        private readonly HotkeyHost _cancelKey;
+        private readonly List<GlueFragment> _fragments = new List<GlueFragment>();
+        private readonly List<GlueFragment> _exempt = new List<GlueFragment>();
+        private GlueFragment _drag;
+        private Point _grab;
+        private Point _position;
+        private bool _touching;
+        private bool _finished;
+        private int _glueCount;
+
+        public GlueSelectionForm(string hotkey, bool outlineFades, bool rotationEnabled, int outlineThickness, Action playGlue, Action completed)
+        {
+            _hotkeyText = hotkey;
+            _outlineFades = outlineFades;
+            _outlineThickness = Math.Max(1, outlineThickness);
+            _rotationEnabled = rotationEnabled;
+            _playGlue = playGlue;
+            _completed = completed;
+            _virtualScreen = SystemInformation.VirtualScreen;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            Bounds = _virtualScreen;
+            TopMost = true;
+            BackColor = Color.FromArgb(20, 24, 32);
+            Opacity = 0.24;
+            DoubleBuffered = true;
+            _cancelKey = new HotkeyHost(delegate { QueueUiAction(Cancel); });
+            string error;
+            if (!_cancelKey.SetUnmodified(Keys.Escape, out error)) { }
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x00000080 | 0x08000000;
+                return cp;
+            }
+        }
+
+        internal static bool IsEligible(SliceForm form)
+        {
+            return form != null && !form.IsDisposed && form.Visible && !form.IsLiveDetachedPiece;
+        }
+
+        internal static int CountEligible()
+        {
+            List<SliceForm> forms = PersistentFragmentStore.Snapshot();
+            int count = 0;
+            for (int i = 0; i < forms.Count; i++)
+                if (IsEligible(forms[i])) count++;
+            return count;
+        }
+
+        public void Begin()
+        {
+            List<SliceForm> forms = PersistentFragmentStore.Snapshot();
+            for (int i = 0; i < forms.Count; i++)
+                if (IsEligible(forms[i])) _fragments.Add(new GlueFragment(forms[i]));
+            SliceForm.GlueModeActive = true;
+            Show();
+            Native.PutTopmostWithoutActivate(Handle, Bounds);
+        }
+
+        public void Cancel() { Complete(); }
+
+        private void QueueUiAction(Action action)
+        {
+            if (action == null || IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(new MethodInvoker(delegate { if (!_finished && !IsDisposed) action(); })); }
+            catch { }
+        }
+
+        private void Complete()
+        {
+            if (_finished) return;
+            _finished = true;
+            SliceForm.GlueModeActive = false;
+            _drag = null;
+            Capture = false;
+            Action callback = _completed;
+            _completed = null;
+            Hide();
+            Close();
+            if (callback != null) callback();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                SliceForm.GlueModeActive = false;
+                _cancelKey.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private GlueFragment HitTest(Point screen)
+        {
+            for (int i = _fragments.Count - 1; i >= 0; i--)
+            {
+                GlueFragment candidate = _fragments[i];
+                if (candidate.Fragment.IsDisposed) continue;
+                if (candidate.Contains(screen.X, screen.Y)) return candidate;
+            }
+            return null;
+        }
+
+        private static bool Overlaps(GlueFragment moving, Point position, GlueFragment other)
+        {
+            Rectangle movingArea = new Rectangle(position, moving.Bounds.Size);
+            Rectangle shared = Rectangle.Intersect(movingArea, other.Bounds);
+            if (shared.Width <= 0 || shared.Height <= 0) return false;
+            bool[] movingMask = moving.Mask;
+            bool[] otherMask = other.Mask;
+            int movingWidth = moving.Bounds.Width;
+            int otherWidth = other.Bounds.Width;
+            for (int y = shared.Top; y < shared.Bottom; y++)
+            {
+                int movingIndex = (y - movingArea.Top) * movingWidth + (shared.Left - movingArea.Left);
+                int otherIndex = (y - other.Bounds.Top) * otherWidth + (shared.Left - other.Bounds.Left);
+                for (int x = 0; x < shared.Width; x++)
+                    if (movingMask[movingIndex + x] && otherMask[otherIndex + x]) return true;
+            }
+            return false;
+        }
+
+        private bool Blocked(GlueFragment moving, Point position)
+        {
+            Rectangle area = new Rectangle(position, moving.Bounds.Size);
+            for (int i = 0; i < _fragments.Count; i++)
+            {
+                GlueFragment other = _fragments[i];
+                if (Object.ReferenceEquals(other, moving) || other.Fragment.IsDisposed || _exempt.Contains(other)) continue;
+                if (!area.IntersectsWith(other.Bounds)) continue;
+                if (Overlaps(moving, position, other)) return true;
+            }
+            return false;
+        }
+
+        private Point MoveToward(GlueFragment moving, Point from, Point to)
+        {
+            int dx = to.X - from.X;
+            int dy = to.Y - from.Y;
+            double distance = Math.Sqrt((double)dx * dx + (double)dy * dy);
+            if (distance < 0.5) return from;
+            int steps = (int)Math.Ceiling(distance / 2.0);
+            Point last = from;
+            for (int i = 1; i <= steps; i++)
+            {
+                double t = (double)i / steps;
+                Point candidate = new Point(from.X + (int)Math.Round(dx * t), from.Y + (int)Math.Round(dy * t));
+                if (candidate == last) continue;
+                if (Blocked(moving, candidate)) return RefineToward(moving, last, candidate);
+                last = candidate;
+            }
+            return last;
+        }
+
+        private Point RefineToward(GlueFragment moving, Point free, Point blocked)
+        {
+            int dx = blocked.X - free.X;
+            int dy = blocked.Y - free.Y;
+            int steps = Math.Max(Math.Abs(dx), Math.Abs(dy));
+            Point last = free;
+            for (int i = 1; i <= steps; i++)
+            {
+                double t = (double)i / steps;
+                Point candidate = new Point(free.X + (int)Math.Round(dx * t), free.Y + (int)Math.Round(dy * t));
+                if (candidate == last) continue;
+                if (Blocked(moving, candidate)) return last;
+                last = candidate;
+            }
+            return last;
+        }
+
+        private Point ResolveMove(GlueFragment moving, Point from, Point to)
+        {
+            Point result = MoveToward(moving, from, to);
+            if (result == to) return result;
+            result = MoveToward(moving, result, new Point(to.X, result.Y));
+            result = MoveToward(moving, result, new Point(result.X, to.Y));
+            return result;
+        }
+
+        private List<GlueContact> FindTouching(GlueFragment moving, Point position)
+        {
+            List<GlueContact> contacts = new List<GlueContact>();
+            Rectangle area = Rectangle.Inflate(new Rectangle(position, moving.Bounds.Size), ContactReach, ContactReach);
+            for (int i = 0; i < _fragments.Count; i++)
+            {
+                GlueFragment other = _fragments[i];
+                if (Object.ReferenceEquals(other, moving) || other.Fragment.IsDisposed || _exempt.Contains(other)) continue;
+                if (!area.IntersectsWith(other.Bounds)) continue;
+                for (int j = 0; j < ContactOffsets.Length; j++)
+                {
+                    Point shifted = new Point(position.X + ContactOffsets[j].X, position.Y + ContactOffsets[j].Y);
+                    if (!Overlaps(moving, shifted, other)) continue;
+                    GlueContact contact = new GlueContact();
+                    contact.Other = other;
+                    contact.Direction = new Point(Math.Sign(ContactOffsets[j].X), Math.Sign(ContactOffsets[j].Y));
+                    contacts.Add(contact);
+                    break;
+                }
+            }
+            return contacts;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (_finished) return;
+            if (e.Button == MouseButtons.Right)
+            {
+                Complete();
+                return;
+            }
+            if (e.Button != MouseButtons.Left || _drag != null) return;
+            Point screen = PointToScreen(e.Location);
+            GlueFragment hit = HitTest(screen);
+            if (hit == null) return;
+            _drag = hit;
+            _position = hit.Bounds.Location;
+            _grab = new Point(screen.X - hit.Bounds.X, screen.Y - hit.Bounds.Y);
+            _touching = false;
+            _exempt.Clear();
+            Rectangle area = hit.Bounds;
+            for (int i = 0; i < _fragments.Count; i++)
+            {
+                GlueFragment other = _fragments[i];
+                if (Object.ReferenceEquals(other, hit) || other.Fragment.IsDisposed || !area.IntersectsWith(other.Bounds)) continue;
+                if (Overlaps(hit, _position, other)) _exempt.Add(other);
+            }
+            Capture = true;
+            Cursor = Cursors.SizeAll;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_finished) return;
+            Point cursor = PointToScreen(e.Location);
+            if (_drag == null)
+            {
+                Cursor = HitTest(cursor) != null ? Cursors.SizeAll : Cursors.Default;
+                return;
+            }
+            Point desired = new Point(cursor.X - _grab.X, cursor.Y - _grab.Y);
+            Point resolved = ResolveMove(_drag, _position, desired);
+            if (resolved != _position)
+            {
+                _position = resolved;
+                _drag.MoveTo(resolved);
+                for (int i = _exempt.Count - 1; i >= 0; i--)
+                    if (!Overlaps(_drag, _position, _exempt[i])) _exempt.RemoveAt(i);
+            }
+            bool touching = FindTouching(_drag, _position).Count > 0;
+            if (touching != _touching)
+            {
+                _touching = touching;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (_finished || e.Button != MouseButtons.Left || _drag == null) return;
+            GlueFragment moving = _drag;
+            _drag = null;
+            _touching = false;
+            Capture = false;
+            Cursor = Cursors.Default;
+            try { GlueIfTouching(moving); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "The fragments could not be glued. They were left as they are.\r\n\r\n" + ex.Message, "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            _exempt.Clear();
+            Invalidate();
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture && _drag != null)
+            {
+                _drag = null;
+                _touching = false;
+                _exempt.Clear();
+                Invalidate();
+            }
+        }
+
+        private void GlueIfTouching(GlueFragment moving)
+        {
+            List<GlueContact> contacts = FindTouching(moving, moving.Bounds.Location);
+            if (contacts.Count == 0) return;
+
+            Point position = moving.Bounds.Location;
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                for (int k = 0; k < ContactGap; k++)
+                {
+                    Point candidate = new Point(position.X + contacts[i].Direction.X, position.Y + contacts[i].Direction.Y);
+                    if (Blocked(moving, candidate)) break;
+                    position = candidate;
+                }
+            }
+            if (position != moving.Bounds.Location) moving.MoveTo(position);
+
+            List<GlueFragment> group = new List<GlueFragment>();
+            group.Add(moving);
+            for (int i = 0; i < contacts.Count; i++)
+                if (!group.Contains(contacts[i].Other)) group.Add(contacts[i].Other);
+
+            Rectangle union = group[0].Bounds;
+            for (int i = 1; i < group.Count; i++) union = Rectangle.Union(union, group[i].Bounds);
+
+            Bitmap merged = null;
+            Bitmap outline = null;
+            SliceForm glued = null;
+            try
+            {
+                merged = new Bitmap(union.Width, union.Height, PixelFormat.Format32bppArgb);
+                using (Graphics graphics = Graphics.FromImage(merged))
+                {
+                    graphics.Clear(Color.Transparent);
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                    graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                    for (int i = 0; i < group.Count; i++)
+                    {
+                        using (Bitmap part = group[i].Fragment.CloneImage())
+                        {
+                            Rectangle destination = new Rectangle(group[i].Bounds.X - union.X, group[i].Bounds.Y - union.Y, part.Width, part.Height);
+                            graphics.DrawImage(part, destination, 0, 0, part.Width, part.Height, GraphicsUnit.Pixel);
+                        }
+                    }
+                }
+
+                outline = new Bitmap(union.Width, union.Height, PixelFormat.Format32bppArgb);
+                int seamPixels = 0;
+                for (int i = 0; i < group.Count; i++)
+                    for (int j = i + 1; j < group.Count; j++)
+                        seamPixels += AddSeam(outline, union, group[i], group[j], _outlineThickness);
+
+                if (seamPixels > 0 && !_outlineFades)
+                {
+                    using (Graphics graphics = Graphics.FromImage(merged))
+                    {
+                        graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                        graphics.DrawImage(outline, new Rectangle(0, 0, union.Width, union.Height), 0, 0, union.Width, union.Height, GraphicsUnit.Pixel);
+                    }
+                }
+
+                glued = new SliceForm(merged, union, null);
+                merged = null;
+                glued.MakePersistent(_rotationEnabled);
+                glued.Show();
+                Native.PutTopmostWithoutActivate(glued.Handle, union);
+                if (seamPixels > 0 && _outlineFades)
+                {
+                    glued.BeginGlueOutline(outline, FadeMilliseconds);
+                    outline = null;
+                }
+            }
+            catch
+            {
+                if (glued != null)
+                {
+                    PersistentFragmentStore.Remove(glued);
+                    if (!glued.IsDisposed) glued.Close();
+                }
+                throw;
+            }
+            finally
+            {
+                if (merged != null) merged.Dispose();
+                if (outline != null) outline.Dispose();
+            }
+
+            for (int i = 0; i < group.Count; i++)
+            {
+                SliceForm old = group[i].Fragment;
+                PersistentFragmentStore.Remove(old);
+                if (!old.IsDisposed) old.Close();
+                _fragments.Remove(group[i]);
+            }
+            _fragments.Add(new GlueFragment(glued));
+            _glueCount++;
+            Native.PutTopmostWithoutActivate(Handle, Bounds);
+            if (_playGlue != null) _playGlue();
+        }
+
+        private static int AddSeam(Bitmap outline, Rectangle union, GlueFragment first, GlueFragment second, int thickness)
+{
+    int radius = Math.Max(1, Math.Min(thickness, Math.Max(union.Width, union.Height)));
+
+    Rectangle region = Rectangle.Intersect(
+        Rectangle.Inflate(first.Bounds, radius + 1, radius + 1),
+        Rectangle.Inflate(second.Bounds, radius + 1, radius + 1));
+
+    if (region.Width <= 0 || region.Height <= 0) return 0;
+
+    Color white = Color.FromArgb(OutlineAlpha, 255, 255, 255);
+    int count = 0;
+
+    for (int y = region.Top; y < region.Bottom; y++)
+    {
+        for (int x = region.Left; x < region.Right; x++)
+        {
+            if (!union.Contains(x, y)) continue;
+
+            if (!second.Within(x, y, radius) ||
+                !first.Within(x, y, radius + 1))
+                continue;
+
+            if (!first.Contains(x, y) &&
+                !second.Contains(x, y) &&
+                !first.Within(x, y, radius))
+                continue;
+
+            outline.SetPixel(x - union.X, y - union.Y, white);
+            count++;
+        }
+    }
+
+    return count;
+}
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using (SolidBrush textBrush = new SolidBrush(Color.White))
+            using (Font textFont = new Font("Segoe UI", 14.0f, FontStyle.Bold))
+            using (Font smallFont = new Font("Segoe UI", 10.0f, FontStyle.Regular))
+            {
+                string instructions = "Glue (" + _hotkeyText + ") - drag a fragment against another and release to glue - right-click or Esc to exit";
+                e.Graphics.DrawString(instructions, textFont, textBrush, 24.0f, 22.0f);
+                string status = _touching ? "Release to glue" : _glueCount.ToString() + " glued this session";
+                e.Graphics.DrawString(status, smallFont, textBrush, 26.0f, 52.0f);
+            }
         }
     }
 
@@ -4177,6 +5057,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly AudioClip[] _clips;
         private readonly AudioClip _prepareClip;
         private readonly AudioClip _disperseClip;
+        private readonly AudioClip _glueClip;
         private static readonly object RandomLock = new object();
         private static readonly Random Randomizer = new Random();
 
@@ -4206,15 +5087,37 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 if (File.Exists(dispersePath)) _disperseClip = AudioClip.Load(dispersePath);
             }
             catch { _disperseClip = null; }
+            try
+            {
+                string gluePath = Path.Combine(folder, "glue.wav");
+                if (File.Exists(gluePath)) _glueClip = AudioClip.Load(gluePath);
+            }
+            catch { _glueClip = null; }
         }
 
         public bool HasPrepareClip { get { return _prepareClip != null; } }
         public bool HasDisperseClip { get { return _disperseClip != null; } }
+        public bool HasGlueClip { get { return _glueClip != null; } }
 
         public void PlayPrepare()
         {
             if (_prepareClip == null) return;
             AudioClip clip = _prepareClip;
+            try
+            {
+                ThreadPool.QueueUserWorkItem(delegate(object state)
+                {
+                    try { WindowSliceAudio.Play(clip, (int)clip.SampleRate); }
+                    catch (Exception playbackError) { WindowSliceAudio.LogFailure(playbackError, playbackError); }
+                });
+            }
+            catch { }
+        }
+
+        public void PlayGlue()
+        {
+            if (_glueClip == null) return;
+            AudioClip clip = _glueClip;
             try
             {
                 ThreadPool.QueueUserWorkItem(delegate(object state)
@@ -4382,7 +5285,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _keepWindowOpen = ShouldKeepSourceWindowOpen(settings.KeepWindowsOpenAfterSlicing, target);
             _interactiveDetachedPieces = settings.DetachedPiecesInteractive;
             _refreshLiveFragments = settings.RefreshLiveFragments &&
-                Settings.CanRefreshLiveFragments(_keepWindowOpen, settings.KeepFragments);
+    Settings.CanRefreshLiveFragments(_keepWindowOpen, settings.KeepFragments);
             if (_keepWindowOpen && extractionShapes != null && extractionShapes.Count > 0)
             {
                 if (extractionShapes.Count != 1)
@@ -5322,6 +6225,10 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly TextBox _selectionHotkey;
         private readonly TextBox _precisionHotkey;
         private readonly TextBox _disperseSnapshotsHotkey;
+        private readonly TextBox _glueHotkey;
+        private readonly Button _glueCapture;
+        private readonly CheckBox _glueOutlineFades;
+        private readonly NumericUpDown _glueOutlineThickness;
         private readonly Button _quickCapture;
         private readonly Button _selectionCapture;
         private readonly Button _precisionCapture;
@@ -5488,10 +6395,13 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _refreshLiveFragments.Checked = current.RefreshLiveFragments;
             _refreshLiveFragments.Enabled = Settings.CanRefreshLiveFragments(_keepWindowsOpen.Checked, _keepFragments.Checked);
             Action updateRefreshAvailability = delegate
-            {
-                if (_keepFragments.Checked) _refreshLiveFragments.Checked = false;
-                _refreshLiveFragments.Enabled = Settings.CanRefreshLiveFragments(_keepWindowsOpen.Checked, _keepFragments.Checked);
-            };
+{
+    _refreshLiveFragments.Enabled =
+        Settings.CanRefreshLiveFragments(
+            _keepWindowsOpen.Checked,
+            _keepFragments.Checked
+        );
+};
             _keepFragments.CheckedChanged += delegate { updateRefreshAvailability(); };
             _keepWindowsOpen.CheckedChanged += delegate
             {
@@ -5615,7 +6525,68 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             cutsPage.AutoScroll = true;
             animationPage.AutoScroll = true;
             fragmentsPage.AutoScroll = true;
-            shortcutsPage.Controls.Add(CreateSettingsPage(layout, 0, new int[] { 60, 60, 60 }));
+            TableLayoutPanel shortcutsTable = CreateSettingsPage(layout, 0, new int[] { 60, 60, 60 });
+            _glueHotkey = CreateHotkeyBox(current.GlueHotkey);
+            _glueCapture = CreateCaptureButton();
+            _glueCapture.Click += delegate { BeginCapture(_glueHotkey, _glueCapture); };
+            _glueOutlineFades = new CheckBox();
+            _glueOutlineFades.Text = "Glue outline fades away after 3 seconds";
+            _glueOutlineFades.Checked = current.GlueOutlineFades;
+            _glueOutlineThickness = NumberBox(
+    1,
+    current.UnlimitedPerformance ? Int32.MaxValue : 20,
+    1,
+    current.GlueOutlineThickness
+);
+
+UpdatePerformanceLimits();
+
+            _glueOutlineFades.AutoSize = false;
+            _glueOutlineFades.Dock = DockStyle.Fill;
+            Label glueNote = new Label();
+            glueNote.Text = "Drag one fragment against another and release to glue them. Only works while \"Keep fragments draggable\" is on.";
+            glueNote.ForeColor = SystemColors.GrayText;
+            glueNote.AutoSize = false;
+            glueNote.Dock = DockStyle.Fill;
+            TableLayoutPanel glueLayout = new TableLayoutPanel();
+            glueLayout.Dock = DockStyle.Fill;
+            glueLayout.ColumnCount = 1;
+            glueLayout.RowCount = 4;
+            glueLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            glueLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            glueLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            glueLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            glueLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+            FlowLayoutPanel thicknessPanel = new FlowLayoutPanel();
+thicknessPanel.Dock = DockStyle.Fill;
+thicknessPanel.FlowDirection = FlowDirection.LeftToRight;
+thicknessPanel.WrapContents = false;
+
+Label thicknessLabel = new Label();
+thicknessLabel.Text = "Outline thickness:";
+thicknessLabel.AutoSize = true;
+thicknessLabel.Margin = new Padding(0, 6, 8, 0);
+
+_glueOutlineThickness.Width = 90;
+_glueOutlineThickness.Margin = new Padding(0, 2, 0, 0);
+
+thicknessPanel.Controls.Add(thicknessLabel);
+thicknessPanel.Controls.Add(_glueOutlineThickness);
+
+glueLayout.Controls.Add(CreateHotkeyPanel(_glueHotkey, _glueCapture), 0, 0);
+glueLayout.Controls.Add(_glueOutlineFades, 0, 1);
+glueLayout.Controls.Add(thicknessPanel, 0, 2);
+glueLayout.Controls.Add(glueNote, 0, 3);
+            Label glueLabel = new Label();
+            glueLabel.Text = "Glue shortcut";
+            glueLabel.Dock = DockStyle.Fill;
+            glueLabel.TextAlign = ContentAlignment.TopLeft;
+            glueLabel.Padding = new Padding(0, 6, 0, 0);
+            shortcutsTable.RowCount = 4;
+            shortcutsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 148));
+            shortcutsTable.Controls.Add(glueLabel, 0, 3);
+            shortcutsTable.Controls.Add(glueLayout, 1, 3);
+            shortcutsPage.Controls.Add(shortcutsTable);
             cutsPage.Controls.Add(CreateSettingsPage(layout, 3, new int[] { 60, 60, 60 }));
             animationPage.Controls.Add(CreateSettingsPage(layout, 6, new int[] { 54, 54, 54, 54, 54, 54, 54 }));
             fragmentsPage.Controls.Add(CreateSettingsPage(layout, 13, new int[] { 196, 54, 54, 74, 68 }));
@@ -5814,6 +6785,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             SetNumberBoxLimits(_duration, _unlimitedPerformance.Checked ? Int32.MinValue : 150, _unlimitedPerformance.Checked ? Int32.MaxValue : 6000);
             SetNumberBoxLimits(_distance, _unlimitedPerformance.Checked ? Int32.MinValue : 0, _unlimitedPerformance.Checked ? Int32.MaxValue : 600);
             SetNumberBoxLimits(_slashThickness, _unlimitedPerformance.Checked ? Int32.MinValue : 1, _unlimitedPerformance.Checked ? Int32.MaxValue : 40);
+
+if (_glueOutlineThickness != null)
+{
+    SetNumberBoxLimits(
+        _glueOutlineThickness,
+        1,
+        _unlimitedPerformance.Checked ? Int32.MaxValue : 20
+    );
+}
         }
 
         private static void SetNumberBoxLimits(NumericUpDown box, int minimum, int maximum)
@@ -5863,23 +6843,25 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             HotkeySpec quick;
             HotkeySpec selection;
             HotkeySpec precision;
+            HotkeySpec glue;
             HotkeySpec disperseSnapshots;
-            if (!HotkeySpec.TryParse(_quickHotkey.Text, out quick) || !HotkeySpec.TryParse(_selectionHotkey.Text, out selection) || !HotkeySpec.TryParse(_precisionHotkey.Text, out precision))
+            if (!HotkeySpec.TryParse(_quickHotkey.Text, out quick) || !HotkeySpec.TryParse(_selectionHotkey.Text, out selection) || !HotkeySpec.TryParse(_precisionHotkey.Text, out precision) || !HotkeySpec.TryParse(_glueHotkey.Text, out glue))
             {
-                MessageBox.Show(this, "Choose three valid shortcuts before saving.", "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Choose four valid shortcuts before saving.", "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
                 return;
             }
-            if (SameHotkey(quick, selection) || SameHotkey(quick, precision) || SameHotkey(selection, precision))
+            if (SameHotkey(quick, selection) || SameHotkey(quick, precision) || SameHotkey(selection, precision) ||
+                SameHotkey(quick, glue) || SameHotkey(selection, glue) || SameHotkey(precision, glue))
             {
-                MessageBox.Show(this, "The three shortcuts must be different. Choose a unique shortcut for each mode.", "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The four shortcuts must be different. Choose a unique shortcut for each mode.", "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
                 return;
             }
             if (!String.IsNullOrWhiteSpace(_disperseSnapshotsHotkey.Text) &&
                 (!HotkeySpec.TryParse(_disperseSnapshotsHotkey.Text, out disperseSnapshots) ||
                  SameHotkey(quick, disperseSnapshots) || SameHotkey(selection, disperseSnapshots) ||
-                 SameHotkey(precision, disperseSnapshots)))
+                 SameHotkey(precision, disperseSnapshots) || SameHotkey(glue, disperseSnapshots)))
             {
                 MessageBox.Show(this, "The optional disperse shortcut must be valid and different from the other shortcuts.", "Window Slice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
@@ -5889,6 +6871,9 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             Result.QuickSliceHotkey = _quickHotkey.Text;
             Result.SelectionHotkey = _selectionHotkey.Text;
             Result.PrecisionHotkey = _precisionHotkey.Text;
+            Result.GlueHotkey = _glueHotkey.Text;
+            Result.GlueOutlineFades = _glueOutlineFades.Checked;
+            Result.GlueOutlineThickness = Decimal.ToInt32(_glueOutlineThickness.Value);
             Result.DisperseSnapshotsHotkey = _disperseSnapshotsHotkey.Text;
             Result.Hotkey = Result.QuickSliceHotkey;
             Result.Direction = _direction.SelectedIndex == 1 ? "Horizontal" : _direction.SelectedIndex == 2 ? "Diagonal" : _direction.SelectedIndex == 3 ? "MultiSlash" : "Vertical";
@@ -5928,6 +6913,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly HotkeyHost _quickHotkey;
         private readonly HotkeyHost _selectionHotkey;
         private readonly HotkeyHost _precisionHotkey;
+        private readonly HotkeyHost _glueHotkey;
         private readonly HotkeyHost _disperseSnapshotsHotkey;
         private FragmentRotationKeyboardHook _fragmentRotationHook;
         private readonly Dictionary<IntPtr, ActiveWindowSliceGroup> _activeTargets = new Dictionary<IntPtr, ActiveWindowSliceGroup>();
@@ -5940,6 +6926,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private FragmentMarqueeForm _fragmentMarquee;
         private WindowSelectionForm _selection;
         private PrecisionSelectionForm _precisionSelection;
+        private GlueSelectionForm _glueSelection;
         private Queue<SliceRequest> _batchQueue;
         private List<string> _batchErrors;
         private int _activeAnimationCount;
@@ -5967,6 +6954,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _quickHotkey = new HotkeyHost(BeginQuickSliceAction);
             _selectionHotkey = new HotkeyHost(BeginSelectionAction);
             _precisionHotkey = new HotkeyHost(BeginPrecisionAction);
+            _glueHotkey = new HotkeyHost(BeginGlueAction);
             _disperseSnapshotsHotkey = new HotkeyHost(DisperseWaitingSnapshots);
             _fragmentSelectionTimer.Interval = 15;
             _fragmentSelectionTimer.Tick += MonitorFragmentMarquee;
@@ -6020,11 +7008,13 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _quickHotkey.Clear();
             _selectionHotkey.Clear();
             _precisionHotkey.Clear();
+            _glueHotkey.Clear();
             _disperseSnapshotsHotkey.Clear();
             string error;
             if (!_quickHotkey.Set(_settings.QuickSliceHotkey, out error)) errors.Add("Quick Slice: " + error);
             if (!_selectionHotkey.Set(_settings.SelectionHotkey, out error)) errors.Add("Multi-Select: " + error);
             if (!_precisionHotkey.Set(_settings.PrecisionHotkey, out error)) errors.Add("Precision Slice: " + error);
+            if (!_glueHotkey.Set(_settings.GlueHotkey, out error)) errors.Add("Glue: " + error);
             if (!_disperseSnapshotsHotkey.SetOptional(_settings.DisperseSnapshotsHotkey, out error)) errors.Add("Disperse snapshots: " + error);
             if (_settings.RotateFragmentsWithArrowKeys && _fragmentRotationHook == null)
             {
@@ -6089,7 +7079,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 _fragmentDragStart = cursor;
                 _fragmentMarqueeActive = false;
                 _fragmentMarqueeArmed = _settings.KeepFragments && PersistentFragmentStore.Count > 0 &&
-                    _selection == null && _precisionSelection == null && !PersistentFragmentStore.ContainsPoint(cursor);
+                    _selection == null && _precisionSelection == null && _glueSelection == null && !PersistentFragmentStore.ContainsPoint(cursor) &&
+                    !PersistentFragmentStore.IsLiveSourceWindowAt(cursor);
             }
 
             if (leftDown && _fragmentMarqueeArmed)
@@ -6135,20 +7126,61 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
 
         private void BeginQuickSliceAction()
         {
-            if (_selection != null || _precisionSelection != null) return;
+            if (_selection != null || _precisionSelection != null || _glueSelection != null) return;
             SliceActiveWindow();
         }
 
         private void BeginSelectionAction()
         {
-            if (_selection != null || _precisionSelection != null) return;
+            if (_selection != null || _precisionSelection != null || _glueSelection != null) return;
             BeginSelectionOverlay();
         }
 
         private void BeginPrecisionAction()
         {
-            if (_selection != null || _precisionSelection != null) return;
+            if (_selection != null || _precisionSelection != null || _glueSelection != null) return;
             BeginPrecisionOverlay();
+        }
+
+        private void BeginGlueAction()
+        {
+            if (_glueSelection != null)
+            {
+                _glueSelection.Cancel();
+                return;
+            }
+            if (_selection != null || _precisionSelection != null) return;
+            if (!_settings.KeepFragments)
+            {
+                ShowProblem("Glue mode only works with \"Keep fragments draggable\" turned on. Turn it on in Settings, slice something, then try again.");
+                return;
+            }
+            if (GlueSelectionForm.CountEligible() < 2)
+            {
+                ShowProblem("Glue mode needs at least two fragments on screen.");
+                return;
+            }
+            BeginGlueOverlay();
+        }
+
+        private void BeginGlueOverlay()
+        {
+            try
+            {
+                _glueSelection = new GlueSelectionForm(
+    _settings.GlueHotkey,
+    _settings.GlueOutlineFades,
+    _settings.RotateFragmentsWithArrowKeys,
+    _settings.GlueOutlineThickness,
+    delegate { _sounds.PlayGlue(); },
+    delegate { _glueSelection = null; });
+                _glueSelection.Begin();
+            }
+            catch (Exception ex)
+            {
+                if (_glueSelection != null) { _glueSelection.Dispose(); _glueSelection = null; }
+                ShowProblem("The glue overlay could not start. No fragment was changed.\r\n\r\n" + ex.Message);
+            }
         }
 
         private void BeginSelectionOverlay()
@@ -6824,6 +7856,7 @@ catch
             _disposed = true;
             if (_selection != null) { _selection.Cancel(); _selection = null; }
             if (_precisionSelection != null) { _precisionSelection.Cancel(); _precisionSelection = null; }
+            if (_glueSelection != null) { _glueSelection.Cancel(); _glueSelection = null; }
             _fragmentSelectionTimer.Stop();
             _fragmentSelectionTimer.Tick -= MonitorFragmentMarquee;
             _fragmentSelectionTimer.Dispose();
@@ -6831,6 +7864,7 @@ catch
             _quickHotkey.Dispose();
             _selectionHotkey.Dispose();
             _precisionHotkey.Dispose();
+            _glueHotkey.Dispose();
             _disperseSnapshotsHotkey.Dispose();
             if (_fragmentRotationHook != null)
             {
@@ -7462,7 +8496,12 @@ catch
                     {
                         piece.MakePersistent();
                         session.Attach(piece, new Rectangle(100, 110, 20, 20), true);
-                        ToolStripMenuItem moveModeItem = piece.ContextMenuStrip.Items[4] as ToolStripMenuItem;
+                        ToolStripMenuItem moveModeItem = null;
+                        foreach (ToolStripItem menuEntry in piece.ContextMenuStrip.Items)
+                        {
+                            ToolStripMenuItem candidate = menuEntry as ToolStripMenuItem;
+                            if (candidate != null && candidate.Text == "Toggle Move Mode") { moveModeItem = candidate; break; }
+                        }
                         bool startsInLiveMode = moveModeItem != null && moveModeItem.Text == "Toggle Move Mode" && !piece.IsLiveMoveMode;
                         if (moveModeItem != null) moveModeItem.PerformClick();
                         bool entersMoveMode = moveModeItem != null && moveModeItem.Text == "Toggle Live Mode" && piece.IsLiveMoveMode;
@@ -7615,13 +8654,13 @@ catch
             Check("disables live fragment options unless source windows stay open", !detachedInputWithoutLiveWindow.DetachedPiecesInteractive && !detachedInputWithoutLiveWindow.RefreshLiveFragments, ref failures);
             Settings refreshWithKeptFragments = new Settings { KeepWindowsOpenAfterSlicing = true, KeepFragments = true, RefreshLiveFragments = true };
             refreshWithKeptFragments.Normalize();
-            Check("disables live refresh whenever fragments are retained", !refreshWithKeptFragments.RefreshLiveFragments && !Settings.CanRefreshLiveFragments(true, true) && Settings.CanRefreshLiveFragments(true, false) && !Settings.CanRefreshLiveFragments(false, false), ref failures);
+            Check("allows live refresh when fragments are retained", refreshWithKeptFragments.RefreshLiveFragments && Settings.CanRefreshLiveFragments(true, true) && Settings.CanRefreshLiveFragments(true, false) && !Settings.CanRefreshLiveFragments(false, false), ref failures);
             Check("recognizes only Window Slice's standard warning dialogs as self-targets", WindowTarget.IsOwnUtilityWarningDialog((uint)Process.GetCurrentProcess().Id, "#32770", "Window Slice") && WindowTarget.IsOwnUtilityWarningDialog((uint)Process.GetCurrentProcess().Id, "#32770", "Shortcut") && !WindowTarget.IsOwnUtilityWarningDialog((uint)Process.GetCurrentProcess().Id, "#32770", "Color") && !WindowTarget.IsOwnUtilityWarningDialog(0, "#32770", "Window Slice") && !WindowTarget.IsOwnUtilityWarningDialog((uint)Process.GetCurrentProcess().Id, "WindowsForms10.Window.8.app.0.141b42a_r9_ad1", "Window Slice"), ref failures);
             Check("allows slicing the settings window but keeps other own-process windows excluded", WindowTarget.IsOwnSettingsWindow((uint)Process.GetCurrentProcess().Id, "Window Slice settings") && !WindowTarget.IsOwnSettingsWindow(0, "Window Slice settings") && !WindowTarget.IsOwnSettingsWindow((uint)Process.GetCurrentProcess().Id, "Window Slice"), ref failures);
             JavaScriptSerializer serializer = new JavaScriptSerializer();
             Settings roundTrip = serializer.Deserialize<Settings>(serializer.Serialize(new Settings { QuickSliceHotkey = "Ctrl+Alt+1", SelectionHotkey = "F8", PrecisionHotkey = "Ctrl+Shift+F8", DisperseSnapshotsHotkey = "Ctrl+Alt+D", Hotkey = "Ctrl+Alt+1", Direction = "MultiSlash", MultiSlashCount = 8, MultiPattern = "Random", DurationMs = 850, DistancePx = 240, SlashColor = "#123456", OutlineColor = "#ABCDEF", SlashThickness = 27, ConfirmBeforeClose = false, AllowRepeatedSlices = true, KeepFragments = true, UnlimitedPerformance = true, ClickToDisperse = true, RotateFragmentsWithArrowKeys = true, KeepWindowsOpenAfterSlicing = true, DetachedPiecesInteractive = true, RefreshLiveFragments = true }));
             roundTrip.Normalize();
-            Check("normalizes live fragment refresh off when fragments are retained", roundTrip != null && roundTrip.KeepFragments && !roundTrip.RefreshLiveFragments, ref failures);
+            Check("preserves live refresh when fragments are retained", roundTrip != null && roundTrip.KeepFragments && roundTrip.RefreshLiveFragments, ref failures);
             Check("serializes all fragment and live-window settings", roundTrip != null && roundTrip.QuickSliceHotkey == "Ctrl+Alt+1" && roundTrip.SelectionHotkey == "F8" && roundTrip.PrecisionHotkey == "Ctrl+Shift+F8" && roundTrip.DisperseSnapshotsHotkey == "Ctrl+Alt+D" && roundTrip.Direction == "MultiSlash" && roundTrip.MultiSlashCount == 8 && roundTrip.MultiPattern == "Random" && roundTrip.DurationMs == 850 && roundTrip.DistancePx == 240 && roundTrip.SlashColor == "#123456" && roundTrip.OutlineColor == "#ABCDEF" && roundTrip.SlashThickness == 27 && !roundTrip.ConfirmBeforeClose && roundTrip.AllowRepeatedSlices && roundTrip.KeepFragments && roundTrip.UnlimitedPerformance && roundTrip.ClickToDisperse && roundTrip.RotateFragmentsWithArrowKeys && roundTrip.KeepWindowsOpenAfterSlicing && roundTrip.DetachedPiecesInteractive && !roundTrip.RefreshLiveFragments, ref failures);
             Settings duplicateDisperseShortcut = new Settings { QuickSliceHotkey = "Ctrl+Alt+1", SelectionHotkey = "F8", PrecisionHotkey = "Ctrl+Shift+F8", DisperseSnapshotsHotkey = "F8" };
             duplicateDisperseShortcut.Normalize();
@@ -7671,9 +8710,9 @@ catch
                         foreach (Control child in persistentOptions.Controls)
                             if (child is CheckBox && (child as CheckBox).Text == "Rotate fragments with arrow keys") hasRotationOption = true;
                     bool hasLiveWindowOption = false;
-                    bool hasInteractivePieceOption = false;
-                    bool hasRefreshPieceOption = false;
-                    bool refreshDisabledWhenKeepingFragments = false;
+bool hasInteractivePieceOption = false;
+bool hasRefreshPieceOption = false;
+bool refreshPieceOptionEnabled = false;
                     if (persistentOptions != null)
                         foreach (Control child in persistentOptions.Controls)
                             if (child is CheckBox)
@@ -7683,8 +8722,8 @@ catch
                                 if ((child as CheckBox).Text == "Refresh detached fragments from live window (work in progress)")
                                 {
                                     hasRefreshPieceOption = true;
-                                    refreshDisabledWhenKeepingFragments =
-                                        !(child as CheckBox).Enabled && !(child as CheckBox).Checked;
+                                    refreshPieceOptionEnabled =
+    (child as CheckBox).Enabled;
                                 }
                             }
                     bool hasBackNext = false;
@@ -7699,7 +8738,7 @@ catch
                                         if (((Button)button).Text == "Back") { backButton = (Button)button; hasBackNext = true; }
                                         if (((Button)button).Text == "Next") nextButton = (Button)button;
                                     }
-                    bool pageLayoutsValid = shortcuts != null && shortcuts.RowCount == 3 && shortcuts.AutoSize && pages.TabPages[0].AutoScroll && cuts != null && cuts.RowCount == 3 && cuts.AutoSize && pages.TabPages[1].AutoScroll && animation != null && animation.RowCount == 7 && animation.AutoSize && pages.TabPages[2].AutoScroll && fragments != null && fragments.RowCount == 5 && fragments.AutoSize && pages.TabPages[3].AutoScroll && pages.TabPages.Count == 4;
+                    bool pageLayoutsValid = shortcuts != null && shortcuts.RowCount == 4 && shortcuts.AutoSize && pages.TabPages[0].AutoScroll && cuts != null && cuts.RowCount == 3 && cuts.AutoSize && pages.TabPages[1].AutoScroll && animation != null && animation.RowCount == 7 && animation.AutoSize && pages.TabPages[2].AutoScroll && fragments != null && fragments.RowCount == 5 && fragments.AutoSize && pages.TabPages[3].AutoScroll && pages.TabPages.Count == 4;
                     if (pageLayoutsValid)
                     {
                         TableLayoutPanel[] allPages = new TableLayoutPanel[] { shortcuts, cuts, animation, fragments };
@@ -7708,7 +8747,7 @@ catch
                                 pageLayoutsValid = pageLayoutsValid && allPages[pageIndex].GetControlFromPosition(0, row) != null &&
                                     allPages[pageIndex].GetControlFromPosition(1, row) != null;
                     }
-                    settingsUi = form.ClientSize.Width == 720 && form.ClientSize.Height == 696 && pageLayoutsValid && quick is Panel && selection is Panel && precision is Panel && cuts.GetControlFromPosition(1, 0) is ComboBox && cuts.GetControlFromPosition(1, 1) is NumericUpDown && cuts.GetControlFromPosition(1, 2) is ComboBox && duration != null && duration.Maximum == 6000 && distance != null && distance.Minimum == 0 && animation.GetControlFromPosition(1, 6) is CheckBox && persistent != null && persistent.Controls.Count == 2 && persistentOptions != null && persistentOptions.Controls.Count == 5 && hasRotationOption && hasLiveWindowOption && hasInteractivePieceOption && hasRefreshPieceOption && refreshDisabledWhenKeepingFragments && clickToDisperse != null && !clickToDisperse.Checked && hasOptionalDisperseShortcut && fragments.GetControlFromPosition(1, 4) is Panel && footer != null && hasBackNext;
+                    settingsUi = form.ClientSize.Width == 720 && form.ClientSize.Height == 696 && pageLayoutsValid && quick is Panel && selection is Panel && precision is Panel && cuts.GetControlFromPosition(1, 0) is ComboBox && cuts.GetControlFromPosition(1, 1) is NumericUpDown && cuts.GetControlFromPosition(1, 2) is ComboBox && duration != null && duration.Maximum == 6000 && distance != null && distance.Minimum == 0 && animation.GetControlFromPosition(1, 6) is CheckBox && persistent != null && persistent.Controls.Count == 2 && persistentOptions != null && persistentOptions.Controls.Count == 5 && hasRotationOption && hasLiveWindowOption && hasInteractivePieceOption && hasRefreshPieceOption && refreshPieceOptionEnabled && clickToDisperse != null && !clickToDisperse.Checked && hasOptionalDisperseShortcut && fragments.GetControlFromPosition(1, 4) is Panel && footer != null && hasBackNext;
                     settingsUi = settingsUi && backButton != null && nextButton != null &&
                         !backButton.Enabled && nextButton.Enabled;
                 }
