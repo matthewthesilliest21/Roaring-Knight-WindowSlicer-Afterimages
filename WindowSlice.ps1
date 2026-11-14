@@ -32,6 +32,10 @@ namespace WindowSlice
         public string DisperseSnapshotsHotkey;
         public string Direction = "Vertical";
         public int MultiSlashCount = 6;
+        public double SlashDelayMs = 0.01;
+        public double DispersionDelayMs = 0.01;
+        public bool GravityEnabled = false;
+        public int GravityStrength = 2500;
         public string MultiPattern = "Radial";
         public int DurationMs = 600;
         public int DistancePx = 180;
@@ -41,6 +45,7 @@ namespace WindowSlice
         public bool ConfirmBeforeClose = true;
         public bool AllowRepeatedSlices = false;
         public bool KeepFragments = false;
+        public string FragmentBackColor = "";
         public bool FragmentsCanBeSliced = false;
         public bool UnlimitedPerformance = false;
         public bool ClickToDisperse = false;
@@ -115,6 +120,7 @@ namespace WindowSlice
             else MultiPattern = "Random";
             SlashColor = NormalizeHexColor(SlashColor, "#08080B");
             OutlineColor = NormalizeHexColor(OutlineColor, "#E6182A");
+            FragmentBackColor = String.IsNullOrEmpty(FragmentBackColor) ? String.Empty : NormalizeHexColor(FragmentBackColor, String.Empty);
             if (!UnlimitedPerformance)
             {
                 if (MultiSlashCount < 2) MultiSlashCount = 2;
@@ -125,7 +131,15 @@ namespace WindowSlice
                 if (DistancePx > 600) DistancePx = 600;
                 if (SlashThickness < 1) SlashThickness = 1;
                 if (SlashThickness > 40) SlashThickness = 40;
+                if (GravityStrength < 0) GravityStrength = 0;
+                if (GravityStrength > 20000) GravityStrength = 20000;
             }
+            double delayFloor = UnlimitedPerformance ? 0.0 : 0.01;
+            double delayCeiling = UnlimitedPerformance ? Int32.MaxValue : 60000.0;
+            if (Double.IsNaN(SlashDelayMs) || SlashDelayMs < delayFloor) SlashDelayMs = delayFloor;
+            if (SlashDelayMs > delayCeiling) SlashDelayMs = delayCeiling;
+            if (Double.IsNaN(DispersionDelayMs) || DispersionDelayMs < delayFloor) DispersionDelayMs = delayFloor;
+            if (DispersionDelayMs > delayCeiling) DispersionDelayMs = delayCeiling;
             if (GlueOutlineThickness < 1) GlueOutlineThickness = 1;
 if (!UnlimitedPerformance && GlueOutlineThickness > 20)
     GlueOutlineThickness = 20;
@@ -3182,6 +3196,9 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private ContextMenuStrip _fragmentMenu;
         private ToolStripMenuItem _liveModeItem;
         private Bitmap _backImage;
+        private int _backImageVersion;
+        private static Color? _backFaceTint;
+        private static int _backFaceVersion;
         private double _rotationX;
         private double _rotationY;
         private LiveWindowSliceSession _liveSliceSession;
@@ -3217,6 +3234,13 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         PresentLayered(false);
     }
 }
+        internal Bitmap DetachImage()
+        {
+            Bitmap detached = _image;
+            _image = null;
+            return detached;
+        }
+
         public void MakePersistent()
         {
             MakePersistent(false);
@@ -3469,6 +3493,27 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         internal bool IsLiveDetachedPiece { get { return _liveSliceSession != null; } }
         internal bool IsLiveMoveMode { get { return _liveSliceSession != null && _liveMoveMode; } }
 
+        internal static void ProjectionCoefficients(double rotationX, double rotationY, out float m11, out float m21, out float m22)
+        {
+            double radiansX = rotationX * Math.PI / 180.0;
+            double radiansY = rotationY * Math.PI / 180.0;
+            m11 = (float)Math.Cos(radiansY);
+            m21 = (float)(Math.Sin(radiansX) * Math.Sin(radiansY));
+            m22 = (float)Math.Cos(radiansX);
+        }
+
+        internal static Bitmap CreateBackImage(Bitmap image)
+        {
+            Bitmap back = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(back))
+            using (ImageAttributes attributes = new ImageAttributes())
+            {
+                attributes.SetColorMatrix(CreateBackColorMatrix());
+                graphics.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height), 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
+            }
+            return back;
+        }
+
         internal static double RotationDeterminant(double rotationX, double rotationY)
         {
             double radiansX = rotationX * Math.PI / 180.0;
@@ -3680,12 +3725,9 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     graphics.DrawImage(_glueOutline, destination, 0, 0, _glueOutline.Width, _glueOutline.Height, GraphicsUnit.Pixel, attributes);
                     return;
                 }
-                double radiansX = _rotationX * Math.PI / 180.0;
-                double radiansY = _rotationY * Math.PI / 180.0;
-                float m11 = (float)Math.Cos(radiansY);
+                float m11, m21, m22;
+                ProjectionCoefficients(_rotationX, _rotationY, out m11, out m21, out m22);
                 float m12 = 0.0f;
-                float m21 = (float)(Math.Sin(radiansX) * Math.Sin(radiansY));
-                float m22 = (float)Math.Cos(radiansX);
                 float sourceCenterX = _image.Width * 0.5f;
                 float sourceCenterY = _image.Height * 0.5f;
                 float dx = Width * 0.5f - (m11 * sourceCenterX) - (m21 * sourceCenterY);
@@ -3708,12 +3750,9 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 graphics.DrawImage(image, new Rectangle(0, 0, _image.Width, _image.Height), 0, 0, _image.Width, _image.Height, GraphicsUnit.Pixel);
                 return;
             }
-            double radiansX = _rotationX * Math.PI / 180.0;
-            double radiansY = _rotationY * Math.PI / 180.0;
-            float m11 = (float)Math.Cos(radiansY);
+            float m11, m21, m22;
+            ProjectionCoefficients(_rotationX, _rotationY, out m11, out m21, out m22);
             float m12 = 0.0f;
-            float m21 = (float)(Math.Sin(radiansX) * Math.Sin(radiansY));
-            float m22 = (float)Math.Cos(radiansX);
             float sourceCenterX = _image.Width * 0.5f;
             float sourceCenterY = _image.Height * 0.5f;
             float dx = Width * 0.5f - (m11 * sourceCenterX) - (m21 * sourceCenterY);
@@ -3729,19 +3768,47 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
 
         private Bitmap GetBackImage()
         {
-            if (_backImage != null) return _backImage;
-            _backImage = new Bitmap(_image.Width, _image.Height, PixelFormat.Format32bppArgb);
-            using (Graphics graphics = Graphics.FromImage(_backImage))
-            using (ImageAttributes attributes = new ImageAttributes())
-            {
-                attributes.SetColorMatrix(CreateBackColorMatrix());
-                graphics.DrawImage(_image, new Rectangle(0, 0, _image.Width, _image.Height), 0, 0, _image.Width, _image.Height, GraphicsUnit.Pixel, attributes);
-            }
+            if (_backImage != null && _backImageVersion == _backFaceVersion) return _backImage;
+            if (_backImage != null) _backImage.Dispose();
+            _backImage = CreateBackImage(_image);
+            _backImageVersion = _backFaceVersion;
             return _backImage;
+        }
+
+        internal static void SetBackFaceColor(string hex)
+        {
+            Color? tint = null;
+            if (!String.IsNullOrEmpty(hex))
+            {
+                try { tint = ColorTranslator.FromHtml(hex); }
+                catch { tint = null; }
+            }
+            if (tint.HasValue == _backFaceTint.HasValue && (!tint.HasValue || tint.Value.ToArgb() == _backFaceTint.Value.ToArgb())) return;
+            _backFaceTint = tint;
+            _backFaceVersion++;
         }
 
         internal static ColorMatrix CreateBackColorMatrix()
         {
+            return CreateBackColorMatrix(_backFaceTint);
+        }
+
+        internal static ColorMatrix CreateBackColorMatrix(Color? tint)
+        {
+            if (tint.HasValue)
+            {
+                float red = tint.Value.R / 255.0f;
+                float green = tint.Value.G / 255.0f;
+                float blue = tint.Value.B / 255.0f;
+                return new ColorMatrix(new float[][]
+                {
+                    new float[] { 0.30f * red, 0.30f * green, 0.30f * blue, 0, 0 },
+                    new float[] { 0.59f * red, 0.59f * green, 0.59f * blue, 0, 0 },
+                    new float[] { 0.11f * red, 0.11f * green, 0.11f * blue, 0, 0 },
+                    new float[] { 0, 0, 0, 1, 0 },
+                    new float[] { 0, 0, 0, 0, 1 }
+                });
+            }
             const float saturation = 0.25f;
             const float desaturation = 1.0f - saturation;
             const float brightness = 0.65f;
@@ -4471,6 +4538,243 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         }
     }
 
+    internal sealed class GravityFragment
+    {
+        public Bitmap Image;
+        public double X;
+        public double Y;
+        public double VelocityX;
+        public double VelocityY;
+        public double Gravity;
+        public double Rotation;
+        public double SpinSpeed;
+        public double RotationX;
+        public double RotationY;
+        public double RotationXSpeed;
+        public double RotationYSpeed;
+        public Bitmap BackImage;
+        public double Radius;
+        public double Age;
+    }
+
+    internal sealed class GravityLayerForm : Form
+    {
+        private const double MaximumLifetimeSeconds = 30.0;
+        private const double FadeSeconds = 1.0;
+        private static GravityLayerForm _instance;
+        private readonly List<GravityFragment> _fragments = new List<GravityFragment>();
+        private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
+        private readonly Stopwatch _clock = new Stopwatch();
+        private readonly Rectangle _area;
+        private LayeredSurface _surface;
+        private long _lastTicks;
+        private bool _suspended;
+
+        private GravityLayerForm()
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            TopMost = true;
+            _area = SystemInformation.VirtualScreen;
+            Bounds = _area;
+            _timer.Interval = 15;
+            _timer.Tick += delegate { Step(); };
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x00000080 | 0x08000000 | 0x00080000 | 0x00000020;
+                return cp;
+            }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e) { }
+
+        protected override void OnPaint(PaintEventArgs e) { }
+
+        public static void AddFragments(List<GravityFragment> fragments)
+        {
+            if (fragments == null || fragments.Count == 0) return;
+            if (_instance == null || _instance.IsDisposed) _instance = new GravityLayerForm();
+            _instance.Accept(fragments);
+        }
+
+        public static void HideForCapture()
+        {
+            if (_instance != null && !_instance.IsDisposed) _instance.SuspendLayer();
+        }
+
+        public static void RestoreAfterCapture()
+        {
+            if (_instance != null && !_instance.IsDisposed) _instance.ResumeLayer();
+        }
+
+        private void Accept(List<GravityFragment> fragments)
+        {
+            _fragments.AddRange(fragments);
+            if (_suspended) return;
+            if (!_clock.IsRunning) _clock.Start();
+            if (!Visible)
+            {
+                _lastTicks = _clock.ElapsedTicks;
+                Show();
+                _timer.Start();
+            }
+            Native.PutTopmostWithoutActivate(Handle, _area);
+            Render();
+        }
+
+        private void SuspendLayer()
+        {
+            if (_suspended) return;
+            _suspended = true;
+            if (Visible) Hide();
+        }
+
+        private void ResumeLayer()
+        {
+            if (!_suspended) return;
+            _suspended = false;
+            if (IsDisposed || _fragments.Count == 0) return;
+            _lastTicks = _clock.ElapsedTicks;
+            Show();
+            Native.PutTopmostWithoutActivate(Handle, _area);
+            Render();
+        }
+
+        private void Step()
+        {
+            if (IsDisposed) return;
+            long now = _clock.ElapsedTicks;
+            if (_suspended) { _lastTicks = now; return; }
+            double dt = (now - _lastTicks) / (double)Stopwatch.Frequency;
+            _lastTicks = now;
+            if (dt > 0.05) dt = 0.05;
+            if (dt < 0.0) dt = 0.0;
+            for (int i = _fragments.Count - 1; i >= 0; i--)
+            {
+                GravityFragment fragment = _fragments[i];
+                fragment.Age += dt;
+                fragment.VelocityY += fragment.Gravity * dt;
+                fragment.X += fragment.VelocityX * dt;
+                fragment.Y += fragment.VelocityY * dt;
+                fragment.Rotation += fragment.SpinSpeed * dt;
+                fragment.RotationX = SliceForm.NormalizeAngle(fragment.RotationX + fragment.RotationXSpeed * dt);
+                fragment.RotationY = SliceForm.NormalizeAngle(fragment.RotationY + fragment.RotationYSpeed * dt);
+                if (IsGone(fragment))
+                {
+                    if (fragment.Image != null) fragment.Image.Dispose();
+                    if (fragment.BackImage != null) fragment.BackImage.Dispose();
+                    _fragments.RemoveAt(i);
+                }
+            }
+            if (_fragments.Count == 0)
+            {
+                _timer.Stop();
+                if (Object.ReferenceEquals(_instance, this)) _instance = null;
+                Close();
+                return;
+            }
+            Render();
+        }
+
+        private bool IsGone(GravityFragment fragment)
+        {
+            if (fragment.Age >= MaximumLifetimeSeconds) return true;
+            if (fragment.X + fragment.Radius < _area.Left && fragment.VelocityX <= 0.0) return true;
+            if (fragment.X - fragment.Radius > _area.Right && fragment.VelocityX >= 0.0) return true;
+            if (fragment.Y + fragment.Radius < _area.Top && fragment.VelocityY <= 0.0 && fragment.Gravity <= 0.0) return true;
+            if (fragment.Y - fragment.Radius > _area.Bottom && fragment.VelocityY >= 0.0 && fragment.Gravity >= 0.0) return true;
+            return false;
+        }
+
+        private void Render()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            if (_surface == null) _surface = new LayeredSurface(_area.Width, _area.Height);
+            Graphics g = _surface.Graphics;
+            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+            g.Clear(Color.Transparent);
+            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+            for (int i = 0; i < _fragments.Count; i++) DrawFragment(g, _fragments[i]);
+            _surface.Update(Handle, Location, 255);
+        }
+
+        private void DrawFragment(Graphics g, GravityFragment fragment)
+        {
+            Bitmap image = fragment.Image;
+            if (image == null) return;
+            double localX = fragment.X - _area.Left;
+            double localY = fragment.Y - _area.Top;
+            if (localX + fragment.Radius < 0.0 || localX - fragment.Radius > _area.Width || localY + fragment.Radius < 0.0 || localY - fragment.Radius > _area.Height) return;
+            bool backFacing = SliceForm.RotationDeterminant(fragment.RotationX, fragment.RotationY) < 0.0;
+            if (backFacing)
+            {
+                if (fragment.BackImage == null) fragment.BackImage = SliceForm.CreateBackImage(image);
+                image = fragment.BackImage;
+            }
+            float m11, m21, m22;
+            SliceForm.ProjectionCoefficients(fragment.RotationX, fragment.RotationY, out m11, out m21, out m22);
+            float alpha = 1.0f;
+            double remaining = MaximumLifetimeSeconds - fragment.Age;
+            if (remaining < FadeSeconds) alpha = (float)Math.Max(0.0, remaining / FadeSeconds);
+            int width = image.Width;
+            int height = image.Height;
+            System.Drawing.Drawing2D.GraphicsState state = g.Save();
+            g.TranslateTransform((float)localX, (float)localY);
+            g.RotateTransform((float)(fragment.Rotation * 180.0 / Math.PI));
+            using (System.Drawing.Drawing2D.Matrix projection = new System.Drawing.Drawing2D.Matrix(m11, 0.0f, m21, m22, 0.0f, 0.0f))
+                g.MultiplyTransform(projection);
+            g.TranslateTransform(-width * 0.5f, -height * 0.5f);
+            Rectangle destination = new Rectangle(0, 0, width, height);
+            if (alpha >= 0.995f)
+                g.DrawImage(image, destination, 0, 0, width, height, GraphicsUnit.Pixel);
+            else
+            {
+                using (ImageAttributes attributes = new ImageAttributes())
+                {
+                    ColorMatrix matrix = new ColorMatrix(new float[][]
+                    {
+                        new float[] { 1, 0, 0, 0, 0 },
+                        new float[] { 0, 1, 0, 0, 0 },
+                        new float[] { 0, 0, 1, 0, 0 },
+                        new float[] { 0, 0, 0, alpha, 0 },
+                        new float[] { 0, 0, 0, 0, 1 }
+                    });
+                    attributes.SetColorMatrix(matrix);
+                    attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                    g.DrawImage(image, destination, 0, 0, width, height, GraphicsUnit.Pixel, attributes);
+                }
+            }
+            g.Restore(state);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _timer.Stop();
+                _timer.Dispose();
+                for (int i = 0; i < _fragments.Count; i++)
+                {
+                    if (_fragments[i].Image != null) _fragments[i].Image.Dispose();
+                    if (_fragments[i].BackImage != null) _fragments[i].BackImage.Dispose();
+                }
+                _fragments.Clear();
+                if (_surface != null) { _surface.Dispose(); _surface = null; }
+                if (Object.ReferenceEquals(_instance, this)) _instance = null;
+            }
+            base.Dispose(disposing);
+        }
+    }
+
     internal sealed class SlashForm : Form
     {
         private Bitmap _background;
@@ -4481,6 +4785,14 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly float _thickness;
         private double _overlayOpacity = 1.0;
         private LayeredSurface _surface;
+        internal const double DrawDurationMs = 210.0;
+        public double SlashDelayMs;
+        public int DelayedLineCount;
+
+        public double ExtraDurationMs
+        {
+            get { return DelayedLineCount > 1 && SlashDelayMs > 0.0 ? (DelayedLineCount - 1) * SlashDelayMs : 0.0; }
+        }
 
         public SlashForm(Bitmap background, Rectangle bounds, SlashLine[] lines, Color slashColor, Color outlineColor, float thickness)
         {
@@ -4538,11 +4850,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             g.DrawImage(_background, new Rectangle(0, 0, Width, Height), 0, 0, _background.Width, _background.Height, GraphicsUnit.Pixel);
             g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
             Rectangle crop = new Rectangle(0, 0, Width, Height);
+            double elapsedMs = _progress * (DrawDurationMs + ExtraDurationMs);
             for (int i = 0; i < _lines.Length; i++)
             {
+                double lineElapsed = i < DelayedLineCount ? elapsedMs - i * SlashDelayMs : elapsedMs;
+                if (lineElapsed < 0.0) continue;
+                float lineProgress = (float)Math.Min(1.0, lineElapsed / DrawDurationMs);
                 PointF start = _lines[i].Start;
                 PointF end = _lines[i].End;
-                PointF tip = new PointF(start.X + (end.X - start.X) * (float)_progress, start.Y + (end.Y - start.Y) * (float)_progress);
+                PointF tip = new PointF(start.X + (end.X - start.X) * lineProgress, start.Y + (end.Y - start.Y) * lineProgress);
                 DrawSlashStroke(g, crop, start, tip, 255, _slashColor, _outlineColor, _thickness);
             }
             _surface.Update(Handle, Location, (byte)Math.Round(_overlayOpacity * 255.0));
@@ -5208,6 +5524,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
     internal sealed class SliceAnimation : IDisposable
     {
         private const int MaximumPieces = 256;
+        private const double PerSlashSoundMinimumDelayMs = 50.0;
         private const long MaximumFragmentPixels = 48000000L;
         private static readonly object MultiSlashRandomLock = new object();
         private static readonly Random MultiSlashRandom = new Random();
@@ -5216,6 +5533,9 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly SliceSoundPlayer _sounds;
         private readonly int _duration;
         private readonly int _distance;
+        private readonly double _dispersionDelayMs;
+        private readonly bool _gravityEnabled;
+        private readonly double _gravityStrength;
         private readonly Color _slashColor;
         private readonly Color _outlineColor;
         private readonly float _slashThickness;
@@ -5276,6 +5596,7 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _animationBounds = bounds;
             _duration = settings.DurationMs;
             _distance = settings.DistancePx;
+            _dispersionDelayMs = Math.Max(0.0, settings.DispersionDelayMs);
             _slashColor = ColorTranslator.FromHtml(settings.SlashColor);
             _outlineColor = ColorTranslator.FromHtml(settings.OutlineColor);
             _slashThickness = settings.SlashThickness;
@@ -5299,6 +5620,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 target.Fragment != null,
                 extractionShapes != null && extractionShapes.Count > 0,
                 settings.ClickToDisperse);
+            _gravityEnabled = settings.GravityEnabled && !_keepFragments;
+            _gravityStrength = settings.GravityStrength;
             try
             {
                 List<SlashLine> lines = customLines == null ? BuildSlashLines(bounds.Size, settings) : new List<SlashLine>(customLines);
@@ -5385,6 +5708,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     finally { if (previewImage != null) previewImage.Dispose(); }
                 }
                 _slash = new SlashForm(image, bounds, visualLines.ToArray(), _slashColor, _outlineColor, _slashThickness);
+                _slash.SlashDelayMs = settings.SlashDelayMs;
+                _slash.DelayedLineCount = lines.Count;
             }
             catch
             {
@@ -5896,20 +6221,51 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
 
     _sounds.PlayPrepare();
 
+    QueuePerSlashPrepareSounds();
+
     QueueSliceSound();
 
     _watch.Restart();
 }
 
+        private void QueuePerSlashPrepareSounds()
+        {
+            if (_slash == null || _slash.DelayedLineCount < 2 || _slash.SlashDelayMs < PerSlashSoundMinimumDelayMs) return;
+            int slashCount = _slash.DelayedLineCount;
+            double delayMs = _slash.SlashDelayMs;
+            SliceSoundPlayer sounds = _sounds;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    Stopwatch clock = Stopwatch.StartNew();
+                    for (int i = 1; i < slashCount; i++)
+                    {
+                        double target = i * delayMs;
+                        while (!_done)
+                        {
+                            double remaining = target - clock.Elapsed.TotalMilliseconds;
+                            if (remaining <= 0.0) break;
+                            Thread.Sleep((int)Math.Max(1.0, Math.Min(15.0, remaining)));
+                        }
+                        if (_done) return;
+                        sounds.PlayPrepare();
+                    }
+                }
+                catch { }
+            });
+        }
+
         private void QueueSliceSound()
         {
     if (_sliceSoundQueued) return;
     _sliceSoundQueued = true;
+    int extraSleepMs = (int)Math.Min(2000000000.0, Math.Round((_slash == null ? 0.0 : _slash.ExtraDurationMs) + _dispersionDelayMs));
     ThreadPool.QueueUserWorkItem(delegate
     {
         try
         {
-            Thread.Sleep(800);
+            Thread.Sleep(800 + extraSleepMs);
             _sounds.PlayRandom();
         }
         catch { }
@@ -5919,6 +6275,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private void ShowHalves()
         {
             if (_keepWindowOpen) PrepareLiveWindow();
+            if (_gravityEnabled) StartGravityFall();
+            else
             for (int i = 0; i < _pieces.Count; i++)
             {
                 if (_keepWindowOpen && i == _attachedWindowPieceIndex) continue;
@@ -5929,6 +6287,38 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             if (_slash != null) { _slash.Close(); _slash.Dispose(); _slash = null; }
             _piecesWereShown = true;
             _watch.Restart();
+        }
+
+        private void StartGravityFall()
+        {
+            Random random = new Random(Guid.NewGuid().GetHashCode());
+            double magnitude = Math.Max(200.0, 3000.0 * Math.Abs((double)_distance) / Math.Max(1, _duration));
+            double sign = _distance < 0 ? -1.0 : 1.0;
+            List<GravityFragment> fragments = new List<GravityFragment>();
+            for (int i = 0; i < _pieces.Count; i++)
+            {
+                if (_keepWindowOpen && i == _attachedWindowPieceIndex) continue;
+                Bitmap image = _pieces[i].DetachImage();
+                if (image == null) continue;
+                Rectangle area = _pieceBounds[i];
+                double angle = Math.Atan2(_pieceDirections[i].Y, _pieceDirections[i].X) + (random.NextDouble() - 0.5) * 0.35;
+                double speed = sign * magnitude * (0.75 + random.NextDouble() * 0.5);
+                GravityFragment fragment = new GravityFragment();
+                fragment.Image = image;
+                fragment.X = area.X + area.Width * 0.5;
+                fragment.Y = area.Y + area.Height * 0.5;
+                fragment.VelocityX = Math.Cos(angle) * speed;
+                fragment.VelocityY = Math.Sin(angle) * speed;
+                fragment.Gravity = _gravityStrength;
+                fragment.SpinSpeed = (0.25 + random.NextDouble() * 1.6) * (random.NextDouble() < 0.5 ? -1.0 : 1.0);
+                fragment.RotationX = random.NextDouble() * 360.0;
+                fragment.RotationY = random.NextDouble() * 360.0;
+                fragment.RotationXSpeed = (60.0 + random.NextDouble() * 240.0) * (random.NextDouble() < 0.5 ? -1.0 : 1.0);
+                fragment.RotationYSpeed = (60.0 + random.NextDouble() * 240.0) * (random.NextDouble() < 0.5 ? -1.0 : 1.0);
+                fragment.Radius = 0.5 * Math.Sqrt((double)area.Width * area.Width + (double)area.Height * area.Height);
+                fragments.Add(fragment);
+            }
+            GravityLayerForm.AddFragments(fragments);
         }
 
         private void PrepareLiveWindow()
@@ -6024,22 +6414,29 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                     long slashElapsed = _watch.ElapsedMilliseconds;
                     const int slashDrawDuration = 210;
                     const int slashFadeDuration = 240;
-                    _slash.Progress = Math.Min(1.0, (double)slashElapsed / slashDrawDuration);
+                    double slashExtra = _slash.ExtraDurationMs;
+                    double slashHold = slashExtra + _dispersionDelayMs;
+                    _slash.Progress = Math.Min(1.0, (double)slashElapsed / (slashDrawDuration + slashExtra));
                     if (_clickToDisperse)
                     {
-                        _slash.OverlayOpacity = SlashOverlayOpacity(slashElapsed, slashDrawDuration, slashFadeDuration);
-                        if (slashElapsed >= slashDrawDuration + slashFadeDuration)
+                        _slash.OverlayOpacity = SlashOverlayOpacity(slashElapsed - (long)Math.Round(slashHold), slashDrawDuration, slashFadeDuration);
+                        if (slashElapsed >= slashDrawDuration + slashHold + slashFadeDuration)
                         {
                             ShowWaitingPreviewAndCloseTarget();
                             _waitingForClick = true;
                             _leftMouseDownLastTick = (Native.GetAsyncKeyState(0x01) & 0x8000) != 0;
                         }
                     }
-                    else if (slashElapsed >= 340)
+                    else if (slashElapsed >= 340 + slashHold)
                         ShowHalves();
                     return;
                 }
                 double progress = Math.Min(1.0, (double)_watch.ElapsedMilliseconds / _duration);
+                if (_gravityEnabled)
+                {
+                    if (progress >= 1.0) Finish(true);
+                    return;
+                }
                 double eased = 1.0 - Math.Pow(1.0 - progress, 3.0);
                 double opacity = _keepFragments ? 1.0 : FadeOpacity(progress);
                 for (int i = 0; i < _pieces.Count; i++)
@@ -6235,9 +6632,13 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly Button _disperseSnapshotsCapture;
         private readonly ComboBox _direction;
         private readonly NumericUpDown _multiCount;
+        private readonly NumericUpDown _slashDelay;
+        private readonly NumericUpDown _dispersionDelay;
         private readonly ComboBox _multiPattern;
         private readonly NumericUpDown _duration;
         private readonly NumericUpDown _distance;
+        private readonly CheckBox _gravity;
+        private readonly NumericUpDown _gravityStrength;
         private readonly Button _slashColorButton;
         private readonly Button _outlineColorButton;
         private readonly NumericUpDown _slashThickness;
@@ -6253,6 +6654,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         private readonly CheckBox _refreshLiveFragments;
         private Color _slashColor;
         private Color _outlineColor;
+        private Color? _backFaceColor;
+        private Button _backFaceColorButton;
         private TextBox _capturingBox;
         private Button _capturingButton;
         public Settings Result;
@@ -6269,17 +6672,18 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             current.Normalize();
             _slashColor = ColorTranslator.FromHtml(current.SlashColor);
             _outlineColor = ColorTranslator.FromHtml(current.OutlineColor);
+            _backFaceColor = String.IsNullOrEmpty(current.FragmentBackColor) ? (Color?)null : ColorTranslator.FromHtml(current.FragmentBackColor);
 
             TableLayoutPanel layout = new TableLayoutPanel();
             layout.Dock = DockStyle.Fill;
             layout.Padding = new Padding(14);
             layout.ColumnCount = 2;
-            layout.RowCount = 18;
+            layout.RowCount = 22;
             layout.AutoScroll = false;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 13; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 184));
+            for (int i = 0; i < 17; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 211));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
@@ -6319,13 +6723,35 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             AddLabel(layout, "Number of slashes", 4);
             layout.Controls.Add(_multiCount, 1, 4);
 
+            _slashDelay = new NumericUpDown();
+            _slashDelay.DecimalPlaces = 2;
+            _slashDelay.Minimum = current.UnlimitedPerformance ? 0M : 0.01M;
+            _slashDelay.Maximum = current.UnlimitedPerformance ? (decimal)Int32.MaxValue : 60000M;
+            _slashDelay.Increment = 1M;
+            _slashDelay.Value = (decimal)Math.Max((double)_slashDelay.Minimum, Math.Min((double)_slashDelay.Maximum, current.SlashDelayMs));
+            _slashDelay.Dock = DockStyle.Left;
+            _slashDelay.Width = 120;
+            AddLabel(layout, "Delay between slashes (ms)", 5);
+            layout.Controls.Add(_slashDelay, 1, 5);
+
+            _dispersionDelay = new NumericUpDown();
+            _dispersionDelay.DecimalPlaces = 2;
+            _dispersionDelay.Minimum = current.UnlimitedPerformance ? 0M : 0.01M;
+            _dispersionDelay.Maximum = current.UnlimitedPerformance ? (decimal)Int32.MaxValue : 60000M;
+            _dispersionDelay.Increment = 1M;
+            _dispersionDelay.Value = (decimal)Math.Max((double)_dispersionDelay.Minimum, Math.Min((double)_dispersionDelay.Maximum, current.DispersionDelayMs));
+            _dispersionDelay.Dock = DockStyle.Left;
+            _dispersionDelay.Width = 120;
+            AddLabel(layout, "Delay between last slash and window dispersion (ms)", 6);
+            layout.Controls.Add(_dispersionDelay, 1, 6);
+
             _multiPattern = new ComboBox();
             _multiPattern.DropDownStyle = ComboBoxStyle.DropDownList;
             _multiPattern.Items.AddRange(new object[] { "Radial (through center)", "Random directions" });
             _multiPattern.SelectedIndex = String.Equals(current.MultiPattern, "Random", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
             _multiPattern.Dock = DockStyle.Fill;
-            AddLabel(layout, "Multi-slash layout", 5);
-            layout.Controls.Add(_multiPattern, 1, 5);
+            AddLabel(layout, "Multi-slash layout", 7);
+            layout.Controls.Add(_multiPattern, 1, 7);
             _direction.SelectedIndexChanged += delegate
             {
                 bool multi = _direction.SelectedIndex == 3;
@@ -6337,42 +6763,54 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
 
             _duration = NumberBox(current.UnlimitedPerformance ? Int32.MinValue : 1,
                 current.UnlimitedPerformance ? Int32.MaxValue : Math.Max(6000, current.DurationMs), 50, current.DurationMs);
-            AddLabel(layout, "Animation duration (ms)", 6);
-            layout.Controls.Add(_duration, 1, 6);
+            AddLabel(layout, "Animation duration (ms)", 8);
+            layout.Controls.Add(_duration, 1, 8);
 
             _distance = NumberBox(current.UnlimitedPerformance ? Int32.MinValue : 0,
                 current.UnlimitedPerformance ? Int32.MaxValue : Math.Max(600, current.DistancePx), 10, current.DistancePx);
-            AddLabel(layout, "Travel distance (px)", 7);
-            layout.Controls.Add(_distance, 1, 7);
+            AddLabel(layout, "Travel distance (px)", 9);
+            layout.Controls.Add(_distance, 1, 9);
+
+            _gravity = new CheckBox();
+            _gravity.Text = "Fragments fall and tilt in 3D (needs Keep fragments off)";
+            _gravity.Checked = current.GravityEnabled;
+            _gravity.Dock = DockStyle.Fill;
+            AddLabel(layout, "Gravity", 10);
+            layout.Controls.Add(_gravity, 1, 10);
+
+            _gravityStrength = NumberBox(current.UnlimitedPerformance ? Int32.MinValue : 0,
+                current.UnlimitedPerformance ? Int32.MaxValue : Math.Max(20000, current.GravityStrength), 100, current.GravityStrength);
+            AddLabel(layout, "Gravity strength (px/s/s)", 11);
+            layout.Controls.Add(_gravityStrength, 1, 11);
 
             _slashColorButton = CreateColorButton(_slashColor);
             _slashColorButton.Click += delegate { ChooseColor(true); };
-            AddLabel(layout, "Slash color", 8);
-            layout.Controls.Add(_slashColorButton, 1, 8);
+            AddLabel(layout, "Slash color", 12);
+            layout.Controls.Add(_slashColorButton, 1, 12);
 
             _outlineColorButton = CreateColorButton(_outlineColor);
             _outlineColorButton.Click += delegate { ChooseColor(false); };
-            AddLabel(layout, "Outline color", 9);
-            layout.Controls.Add(_outlineColorButton, 1, 9);
+            AddLabel(layout, "Outline color", 13);
+            layout.Controls.Add(_outlineColorButton, 1, 13);
 
             _slashThickness = NumberBox(current.UnlimitedPerformance ? Int32.MinValue : 1,
                 current.UnlimitedPerformance ? Int32.MaxValue : Math.Max(40, current.SlashThickness), 1, current.SlashThickness);
-            AddLabel(layout, "Slash thickness (px)", 10);
-            layout.Controls.Add(_slashThickness, 1, 10);
+            AddLabel(layout, "Slash thickness (px)", 14);
+            layout.Controls.Add(_slashThickness, 1, 14);
 
             _confirm = new CheckBox();
             _confirm.Text = "Ask before sending the close request";
             _confirm.Checked = current.ConfirmBeforeClose;
             _confirm.Dock = DockStyle.Fill;
-            AddLabel(layout, "Window safety", 11);
-            layout.Controls.Add(_confirm, 1, 11);
+            AddLabel(layout, "Window safety", 15);
+            layout.Controls.Add(_confirm, 1, 15);
 
             _repeatSlices = new CheckBox();
             _repeatSlices.Text = "Allow slicing the same window again while it animates";
             _repeatSlices.Checked = current.AllowRepeatedSlices;
             _repeatSlices.Dock = DockStyle.Fill;
-            AddLabel(layout, "Repeated slices", 12);
-            layout.Controls.Add(_repeatSlices, 1, 12);
+            AddLabel(layout, "Repeated slices", 16);
+            layout.Controls.Add(_repeatSlices, 1, 16);
 
             _keepFragments = new CheckBox();
             _keepFragments.Text = "Keep fragments draggable";
@@ -6403,6 +6841,14 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
         );
 };
             _keepFragments.CheckedChanged += delegate { updateRefreshAvailability(); };
+            Action updateGravityAvailability = delegate
+            {
+                _gravity.Enabled = !_keepFragments.Checked;
+                _gravityStrength.Enabled = !_keepFragments.Checked && _gravity.Checked;
+            };
+            _keepFragments.CheckedChanged += delegate { updateGravityAvailability(); };
+            _gravity.CheckedChanged += delegate { updateGravityAvailability(); };
+            updateGravityAvailability();
             _keepWindowsOpen.CheckedChanged += delegate
             {
                 if (_keepWindowsOpen.Checked &&
@@ -6420,16 +6866,40 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             _confirm.Enabled = !_keepWindowsOpen.Checked;
             TableLayoutPanel persistentOptions = new TableLayoutPanel();
             persistentOptions.Dock = DockStyle.Top;
-            persistentOptions.Height = 135;
-            persistentOptions.RowCount = 5;
+            persistentOptions.Height = 162;
+            persistentOptions.RowCount = 6;
             persistentOptions.ColumnCount = 1;
             persistentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 5; i++) persistentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
+            for (int i = 0; i < 6; i++) persistentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
+            Panel backFacePanel = new Panel();
+            backFacePanel.Dock = DockStyle.Fill;
+            Label backFaceLabel = new Label();
+            backFaceLabel.Text = "Back-side shading color";
+            backFaceLabel.Dock = DockStyle.Left;
+            backFaceLabel.Width = 150;
+            backFaceLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _backFaceColorButton = new Button();
+            _backFaceColorButton.Dock = DockStyle.Left;
+            _backFaceColorButton.Width = 100;
+            _backFaceColorButton.FlatStyle = FlatStyle.Flat;
+            _backFaceColorButton.UseVisualStyleBackColor = false;
+            _backFaceColorButton.FlatAppearance.BorderColor = SystemColors.ControlDark;
+            _backFaceColorButton.Click += delegate { ChooseBackFaceColor(); };
+            Button backFaceReset = new Button();
+            backFaceReset.Text = "Default";
+            backFaceReset.Dock = DockStyle.Left;
+            backFaceReset.Width = 64;
+            backFaceReset.Click += delegate { _backFaceColor = null; UpdateBackFaceButton(); };
+            UpdateBackFaceButton();
+            backFacePanel.Controls.Add(backFaceReset);
+            backFacePanel.Controls.Add(_backFaceColorButton);
+            backFacePanel.Controls.Add(backFaceLabel);
             persistentOptions.Controls.Add(_keepFragments, 0, 0);
-            persistentOptions.Controls.Add(_rotateFragments, 0, 1);
-            persistentOptions.Controls.Add(_keepWindowsOpen, 0, 2);
-            persistentOptions.Controls.Add(_interactiveDetachedPieces, 0, 3);
-            persistentOptions.Controls.Add(_refreshLiveFragments, 0, 4);
+            persistentOptions.Controls.Add(backFacePanel, 0, 1);
+            persistentOptions.Controls.Add(_rotateFragments, 0, 2);
+            persistentOptions.Controls.Add(_keepWindowsOpen, 0, 3);
+            persistentOptions.Controls.Add(_interactiveDetachedPieces, 0, 4);
+            persistentOptions.Controls.Add(_refreshLiveFragments, 0, 5);
             Panel persistentPanel = new Panel();
             persistentPanel.Dock = DockStyle.Fill;
             persistentPanel.Controls.Add(persistentOptions);
@@ -6440,15 +6910,15 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             persistentWarning.Height = 46;
             persistentWarning.AutoSize = false;
             persistentPanel.Controls.Add(persistentWarning);
-            AddLabel(layout, "Persistent fragments", 13);
-            layout.Controls.Add(persistentPanel, 1, 13);
+            AddLabel(layout, "Persistent fragments", 17);
+            layout.Controls.Add(persistentPanel, 1, 17);
 
             _sliceFragments = new CheckBox();
             _sliceFragments.Text = "Allow slicing persistent fragments";
             _sliceFragments.Checked = current.FragmentsCanBeSliced;
             _sliceFragments.Dock = DockStyle.Fill;
-            AddLabel(layout, "Fragments can be sliced", 14);
-            layout.Controls.Add(_sliceFragments, 1, 14);
+            AddLabel(layout, "Fragments can be sliced", 18);
+            layout.Controls.Add(_sliceFragments, 1, 18);
 
             Button removeFragments = new Button();
             removeFragments.Text = "Remove all fragments";
@@ -6460,8 +6930,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
                 PersistentFragmentStore.DisposeAll();
                 removeFragments.Enabled = false;
             };
-            AddLabel(layout, "Fragment cleanup", 15);
-            layout.Controls.Add(removeFragments, 1, 15);
+            AddLabel(layout, "Fragment cleanup", 19);
+            layout.Controls.Add(removeFragments, 1, 19);
 
             _clickToDisperse = new CheckBox();
             _clickToDisperse.Text = "Close after the slash; wait for a click to disperse fragments";
@@ -6484,8 +6954,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             dispersePanel.Controls.Add(disperseHotkeyLabel);
             dispersePanel.Controls.Add(disperseHotkeyPanel);
             dispersePanel.Controls.Add(_clickToDisperse);
-            AddLabel(layout, "Click to disperse", 16);
-            layout.Controls.Add(dispersePanel, 1, 16);
+            AddLabel(layout, "Click to disperse", 20);
+            layout.Controls.Add(dispersePanel, 1, 20);
 
             _unlimitedPerformance = new CheckBox();
             _unlimitedPerformance.Text = "Remove slicing and animation limits";
@@ -6501,8 +6971,8 @@ internal static bool IsOwnUtilityWarningDialog(uint processId, string className,
             performanceWarning.Height = 34;
             performanceWarning.AutoSize = false;
             performancePanel.Controls.Add(performanceWarning);
-            AddLabel(layout, "Performance", 17);
-            layout.Controls.Add(performancePanel, 1, 17);
+            AddLabel(layout, "Performance", 21);
+            layout.Controls.Add(performancePanel, 1, 21);
             _unlimitedPerformance.CheckedChanged += delegate
             {
                 if (_unlimitedPerformance.Checked &&
@@ -6587,9 +7057,9 @@ glueLayout.Controls.Add(glueNote, 0, 3);
             shortcutsTable.Controls.Add(glueLabel, 0, 3);
             shortcutsTable.Controls.Add(glueLayout, 1, 3);
             shortcutsPage.Controls.Add(shortcutsTable);
-            cutsPage.Controls.Add(CreateSettingsPage(layout, 3, new int[] { 60, 60, 60 }));
-            animationPage.Controls.Add(CreateSettingsPage(layout, 6, new int[] { 54, 54, 54, 54, 54, 54, 54 }));
-            fragmentsPage.Controls.Add(CreateSettingsPage(layout, 13, new int[] { 196, 54, 54, 74, 68 }));
+            cutsPage.Controls.Add(CreateSettingsPage(layout, 3, new int[] { 60, 60, 60, 60, 60 }));
+            animationPage.Controls.Add(CreateSettingsPage(layout, 8, new int[] { 54, 54, 54, 54, 54, 54, 54, 54, 54 }));
+            fragmentsPage.Controls.Add(CreateSettingsPage(layout, 17, new int[] { 223, 54, 54, 74, 68 }));
             pages.TabPages.Add(shortcutsPage);
             pages.TabPages.Add(cutsPage);
             pages.TabPages.Add(animationPage);
@@ -6745,6 +7215,31 @@ glueLayout.Controls.Add(glueNote, 0, 3);
             button.Text = FormatHexColor(color);
         }
 
+        private void UpdateBackFaceButton()
+        {
+            if (_backFaceColor.HasValue)
+                UpdateColorButton(_backFaceColorButton, _backFaceColor.Value);
+            else
+            {
+                _backFaceColorButton.BackColor = SystemColors.Control;
+                _backFaceColorButton.ForeColor = SystemColors.ControlText;
+                _backFaceColorButton.Text = "Default";
+            }
+        }
+
+        private void ChooseBackFaceColor()
+        {
+            using (ColorDialog dialog = new ColorDialog())
+            {
+                dialog.FullOpen = true;
+                dialog.AnyColor = true;
+                dialog.Color = _backFaceColor.HasValue ? _backFaceColor.Value : Color.FromArgb(166, 166, 166);
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                _backFaceColor = dialog.Color;
+                UpdateBackFaceButton();
+            }
+        }
+
         private void ChooseColor(bool slash)
         {
             using (ColorDialog dialog = new ColorDialog())
@@ -6785,6 +7280,9 @@ glueLayout.Controls.Add(glueNote, 0, 3);
             SetNumberBoxLimits(_duration, _unlimitedPerformance.Checked ? Int32.MinValue : 150, _unlimitedPerformance.Checked ? Int32.MaxValue : 6000);
             SetNumberBoxLimits(_distance, _unlimitedPerformance.Checked ? Int32.MinValue : 0, _unlimitedPerformance.Checked ? Int32.MaxValue : 600);
             SetNumberBoxLimits(_slashThickness, _unlimitedPerformance.Checked ? Int32.MinValue : 1, _unlimitedPerformance.Checked ? Int32.MaxValue : 40);
+            SetNumberBoxLimits(_gravityStrength, _unlimitedPerformance.Checked ? Int32.MinValue : 0, _unlimitedPerformance.Checked ? Int32.MaxValue : 20000);
+            SetDecimalBoxLimits(_slashDelay, _unlimitedPerformance.Checked ? 0M : 0.01M, _unlimitedPerformance.Checked ? (decimal)Int32.MaxValue : 60000M);
+            SetDecimalBoxLimits(_dispersionDelay, _unlimitedPerformance.Checked ? 0M : 0.01M, _unlimitedPerformance.Checked ? (decimal)Int32.MaxValue : 60000M);
 
 if (_glueOutlineThickness != null)
 {
@@ -6794,6 +7292,14 @@ if (_glueOutlineThickness != null)
         _unlimitedPerformance.Checked ? Int32.MaxValue : 20
     );
 }
+        }
+
+        private static void SetDecimalBoxLimits(NumericUpDown box, decimal minimum, decimal maximum)
+        {
+            box.Maximum = maximum;
+            box.Minimum = minimum;
+            if (box.Value < minimum) box.Value = minimum;
+            else if (box.Value > maximum) box.Value = maximum;
         }
 
         private static void SetNumberBoxLimits(NumericUpDown box, int minimum, int maximum)
@@ -6878,15 +7384,20 @@ if (_glueOutlineThickness != null)
             Result.Hotkey = Result.QuickSliceHotkey;
             Result.Direction = _direction.SelectedIndex == 1 ? "Horizontal" : _direction.SelectedIndex == 2 ? "Diagonal" : _direction.SelectedIndex == 3 ? "MultiSlash" : "Vertical";
             Result.MultiSlashCount = Decimal.ToInt32(_multiCount.Value);
+            Result.SlashDelayMs = (double)_slashDelay.Value;
+            Result.DispersionDelayMs = (double)_dispersionDelay.Value;
             Result.MultiPattern = _multiPattern.SelectedIndex == 1 ? "Random" : "Radial";
             Result.DurationMs = Decimal.ToInt32(_duration.Value);
             Result.DistancePx = Decimal.ToInt32(_distance.Value);
+            Result.GravityEnabled = _gravity.Checked;
+            Result.GravityStrength = Decimal.ToInt32(_gravityStrength.Value);
             Result.SlashColor = FormatHexColor(_slashColor);
             Result.OutlineColor = FormatHexColor(_outlineColor);
             Result.SlashThickness = Decimal.ToInt32(_slashThickness.Value);
             Result.ConfirmBeforeClose = _confirm.Checked;
             Result.AllowRepeatedSlices = _repeatSlices.Checked;
             Result.KeepFragments = _keepFragments.Checked;
+            Result.FragmentBackColor = _backFaceColor.HasValue ? FormatHexColor(_backFaceColor.Value) : String.Empty;
             Result.FragmentsCanBeSliced = _sliceFragments.Checked;
             Result.UnlimitedPerformance = _unlimitedPerformance.Checked;
             Result.ClickToDisperse = _clickToDisperse.Checked;
@@ -6994,6 +7505,7 @@ if (_glueOutlineThickness != null)
         private List<string> RegisterConfiguredHotkeys()
         {
             List<string> errors = new List<string>();
+            SliceForm.SetBackFaceColor(_settings.FragmentBackColor);
             if (!_settings.RotateFragmentsWithArrowKeys && _fragmentRotationHook != null)
             {
                 try
@@ -7831,12 +8343,14 @@ catch
         {
             for (int i = 0; i < _animations.Count; i++) _animations[i].HideForCapture();
             PersistentFragmentStore.HideForCapture();
+            GravityLayerForm.HideForCapture();
         }
 
         private void ResumeAnimationsAfterCapture()
         {
             for (int i = 0; i < _animations.Count; i++) _animations[i].RestoreAfterCapture();
             PersistentFragmentStore.RestoreAfterCapture();
+            GravityLayerForm.RestoreAfterCapture();
         }
 
         private void ShowProblem(string text)
@@ -8747,7 +9261,7 @@ bool refreshPieceOptionEnabled = false;
                                 pageLayoutsValid = pageLayoutsValid && allPages[pageIndex].GetControlFromPosition(0, row) != null &&
                                     allPages[pageIndex].GetControlFromPosition(1, row) != null;
                     }
-                    settingsUi = form.ClientSize.Width == 720 && form.ClientSize.Height == 696 && pageLayoutsValid && quick is Panel && selection is Panel && precision is Panel && cuts.GetControlFromPosition(1, 0) is ComboBox && cuts.GetControlFromPosition(1, 1) is NumericUpDown && cuts.GetControlFromPosition(1, 2) is ComboBox && duration != null && duration.Maximum == 6000 && distance != null && distance.Minimum == 0 && animation.GetControlFromPosition(1, 6) is CheckBox && persistent != null && persistent.Controls.Count == 2 && persistentOptions != null && persistentOptions.Controls.Count == 5 && hasRotationOption && hasLiveWindowOption && hasInteractivePieceOption && hasRefreshPieceOption && refreshPieceOptionEnabled && clickToDisperse != null && !clickToDisperse.Checked && hasOptionalDisperseShortcut && fragments.GetControlFromPosition(1, 4) is Panel && footer != null && hasBackNext;
+                    settingsUi = form.ClientSize.Width == 720 && form.ClientSize.Height == 696 && pageLayoutsValid && quick is Panel && selection is Panel && precision is Panel && cuts.GetControlFromPosition(1, 0) is ComboBox && cuts.GetControlFromPosition(1, 1) is NumericUpDown && cuts.GetControlFromPosition(1, 2) is ComboBox && duration != null && duration.Maximum == 6000 && distance != null && distance.Minimum == 0 && animation.GetControlFromPosition(1, 6) is CheckBox && persistent != null && persistent.Controls.Count == 2 && persistentOptions != null && persistentOptions.Controls.Count == 6 && hasRotationOption && hasLiveWindowOption && hasInteractivePieceOption && hasRefreshPieceOption && refreshPieceOptionEnabled && clickToDisperse != null && !clickToDisperse.Checked && hasOptionalDisperseShortcut && fragments.GetControlFromPosition(1, 4) is Panel && footer != null && hasBackNext;
                     settingsUi = settingsUi && backButton != null && nextButton != null &&
                         !backButton.Enabled && nextButton.Enabled;
                 }
